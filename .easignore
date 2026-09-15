@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+dist/
+.env
+.env.local
+android/
+ios/
+*.apk
+*.aab
+
+# The two EXPO_PUBLIC_ values are embedded in the APK anyway.
+# Keep .env out of Git, but include it in the EAS cloud build archive.
+!.env

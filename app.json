@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "FlightLog",
+    "slug": "flightlog",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "flightlog",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.rulo1023.flightlog"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ]
+  }
+}

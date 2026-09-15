@@ -1,0 +1,13 @@
+# Búsqueda automática: alcance realista
+
+Revisión: 15 de septiembre de 2026. La búsqueda se implementa como una función de servidor de Supabase. La clave del proveedor no sale de esa función ni se incorpora al APK. Cada resultado se ofrece como sugerencia que el usuario acepta y puede corregir.
+
+La primera integración prevista es [AirLabs](https://airlabs.co/docs/flight). Su endpoint de información de vuelo devuelve el vuelo actual o el más cercano: no permite pedir una fecha arbitraria. FlightLog solo trata ese resultado como **vuelo de la fecha elegida** si coinciden tanto el número como el día local de salida. En ese caso puede sugerir aeropuertos, horarios, duración, modelo y matrícula **si esos campos están presentes en el plan y en el vuelo concreto**. La documentación lista `reg_number` en el ejemplo, pero no lo marca expresamente como campo del plan Free, por lo que no se promete su disponibilidad.
+
+Si no hay coincidencia exacta, [AirLabs Routes](https://airlabs.co/docs/routes) ofrece la ruta habitual para el número: salida, destino y a veces horarios, duración y tipo de avión. La ruta actual puede diferir de una operación pasada o futura. Por ello se muestra como **ruta habitual** y nunca se deduce una matrícula a partir de ella. Cuando el mismo número cubre varias rutas, se muestran varias opciones.
+
+El [plan gratuito de AirLabs](https://airlabs.co/travel-apis-for-developers) se anuncia sin tarjeta para desarrollo y prototipos. La cuota mensual exacta y el acceso real a `reg_number` deben comprobarse en la cuenta gratuita antes de confiar en ellos. La app busca tras una breve pausa al escribir para contener consultas; la función limita resultados. No se ha aprobado ningún servicio de pago.
+
+Para vuelos históricos, [AirLabs Historical](https://airlabs.co/docs/historical) está en beta y su documentación pública no ofrece un filtro de fecha ni matrícula en la respuesta abreviada. [Aviationstack Free](https://aviationstack.com/pricing) ofrece 100 consultas al mes pero los datos históricos y futuros son de pago. [OpenSky](https://openskynetwork.github.io/opensky-api/rest.html) y otras redes ADS-B pueden observar aeronaves en algunos lugares y momentos, pero no garantizan relacionar una matrícula con cualquier número comercial y fecha. Cambios de avión y códigos compartidos agravan esa incertidumbre. Siempre se puede escribir o corregir la matrícula manualmente.
+
+Los nombres de aeropuerto pueden completarse más adelante con el catálogo de dominio público [OurAirports](https://ourairports.com/data/). Asiento, clase y comentarios son datos del viajero y permanecen manuales. La procedencia de los campos aceptados se guarda en `field_sources`; al corregirlos se elimina esa marca.

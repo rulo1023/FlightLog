@@ -1,0 +1,2 @@
+[functions.flight-lookup]
+verify_jwt = false

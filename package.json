@@ -1,0 +1,31 @@
+{
+  "name": "flightlog",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "check": "tsc --noEmit",
+    "doctor": "expo-doctor"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-community/datetimepicker": "9.1.0",
+    "@supabase/supabase-js": "^2.116.0",
+    "expo": "~57.0.22",
+    "expo-dev-client": "~57.0.18",
+    "expo-font": "~57.0.4",
+    "expo-sqlite": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-url-polyfill": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  }
+}
