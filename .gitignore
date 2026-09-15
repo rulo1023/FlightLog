@@ -7,3 +7,14 @@ android/
 ios/
 *.apk
 *.aab
+/App.before-*.tsx
+/App.backup-*.tsx
+/.encoding-backup-*/
+/backups/
+/flightera_*.html
+/flightera_*.txt
+/tmp_*
+/planefinder-test.html
+/src/lib/*.before-*.ts
+/src/lib/*.backup-*.ts
+/supabase/functions/*/*.backup.ts

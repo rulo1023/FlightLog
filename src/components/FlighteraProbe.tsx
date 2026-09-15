@@ -1,5 +1,6 @@
 import React from 'react';
 import { View } from 'react-native';
+import { useEffect, useRef } from 'react';
 import { WebView } from 'react-native-webview';
 
 export type FlighteraLiveData = {
@@ -12,12 +13,21 @@ export type FlighteraLiveData = {
 type Props = {
   url: string;
   onData: (data: FlighteraLiveData) => void;
+  onFinished?: () => void;
 };
 
 export function FlighteraProbe({
   url,
   onData,
+  onFinished,
 }: Props) {
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
+  useEffect(() => {
+    const timer = setTimeout(() => onFinishedRef.current?.(), 12000);
+    return () => clearTimeout(timer);
+  }, [url]);
+
   const injectedJavaScript = `
     (function() {
       function value(id) {

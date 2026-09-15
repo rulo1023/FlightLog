@@ -1,5 +1,6 @@
 ﻿import React from 'react';
 import { View } from 'react-native';
+import { useEffect, useRef } from 'react';
 import { WebView } from 'react-native-webview';
 
 export type PlaneFinderAircraftData = {
@@ -70,6 +71,13 @@ export function PlaneFinderProbe({
   onData,
   onFinished,
 }: Props) {
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
+  useEffect(() => {
+    const timer = setTimeout(() => onFinishedRef.current?.(), 12000);
+    return () => clearTimeout(timer);
+  }, [flightNumber, flightDate, departureCode, arrivalCode]);
+
   const dateLabel = planeFinderDateLabel(flightDate);
 
   const injectedJavaScript = `

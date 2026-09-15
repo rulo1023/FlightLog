@@ -1,5 +1,4 @@
 import { AircraftModelPicker } from './src/components/AircraftModelPicker';
-import { FlightRouteMap } from './src/components/FlightRouteMap';
 import { FlighteraProbe } from './src/components/FlighteraProbe';
 import {
   isRecentPlaneFinderDate,
@@ -225,7 +224,7 @@ function ListScreen({ flights, loading, onRefresh, onAdd, onEdit, onDelete, onSi
   ) {
     Alert.alert(
       'Eliminar vuelo',
-      `Se eliminar? ${flight.flight_number}. Esta acci?n no se puede deshacer.`,
+      `Se eliminará ${flight.flight_number}. Esta acción no se puede deshacer.`,
       [
         {
           text: 'Cancelar',
@@ -371,8 +370,8 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
 
     if (!canLookup(number)) {
       Alert.alert(
-        'N�mero de vuelo inv�lido',
-        'Escribe un n�mero de vuelo v�lido, por ejemplo VY2616.',
+        'Número de vuelo inválido',
+        'Escribe un número de vuelo válido, por ejemplo VY2616.',
       );
       return;
     }
@@ -571,18 +570,9 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
               };
             });
           }}
+          onFinished={() => setAllowFlighteraProbe(false)}
         />
       )}
-
-      <FlighteraProbe
-        url="https://www.flightera.net/en/flight_details/VY2616/VY2616/AGP/2026-09-14"
-        onData={(data) => {
-          console.log(
-            'FLIGHTERA PROBE RESULT:',
-            JSON.stringify(data, null, 2),
-          );
-        }}
-      />
 
       <ScrollView contentContainerStyle={styles.editContent} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
@@ -618,7 +608,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
             />
           )}
           <ActionButton
-            label={lookupState === 'searching' ? 'Buscando vuelo�' : 'Buscar datos del vuelo'}
+            label={lookupState === 'searching' ? 'Buscando vuelo…' : 'Buscar datos del vuelo'}
             onPress={searchFlight}
             disabled={lookupState === 'searching'}
             icon="search-outline"
@@ -935,7 +925,7 @@ export default function App() {
         'No se pudo eliminar',
         error instanceof Error
           ? error.message
-          : 'Revisa tu conexi?n e int?ntalo de nuevo.',
+          : 'Revisa tu conexión e inténtalo de nuevo.',
       );
     }
   }
