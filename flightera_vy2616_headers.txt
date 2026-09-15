@@ -1,0 +1,38 @@
+HTTP/1.1 301 Moved Permanently
+Date: Tue, 15 Sep 2026 10:47:51 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+link: <https://cdn2.flightera.net/a/17c892a620ea/base_prod.min.css?20250837-r20260914-ff8ed8a23bb8-17c892a620ea>; rel="preload"; as="style", <https://rsms.me/inter/font-files/InterVariable.woff2?v=4.0>; rel="preload"; as="font"; crossorigin, <https://cdn2.flightera.net/a/5a23be4c5437/app.js?-r20260914-ff8ed8a23bb8-5a23be4c5437>; rel="preload"; as="script"
+location: /en/flight/Vueling-Malaga-Bilbao/VY2616
+Server: cloudflare
+x-bleriot-route: /:lang/flight/:airline
+cf-cache-status: DYNAMIC
+Strict-Transport-Security: max-age=2592000
+Speculation-Rules: "/cdn-cgi/speculation"
+Server-Timing: cfCacheStatus;desc="DYNAMIC"
+Server-Timing: cfEdge;dur=10,cfOrigin;dur=112
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=K2YnBieMPE2rCcBhkcy6CGS7fQCBYS%2FSiArkuZ4ZbhnqCxqBSv1e9NVjtTTRtqqMrL95a62Rv7gxjPlyFwFskOdhWm0jEOEGZKKk0aF2mAYU9CG%2FoDc2GEoaHriOgy7n3D7JiIalAIKDnmPN90VY"}]}
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+CF-RAY: a3b70e406b7bec96-MAD
+alt-svc: h3=":443"; ma=86400
+
+HTTP/1.1 200 OK
+Date: Tue, 15 Sep 2026 10:47:51 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+link: <https://cdn2.flightera.net/a/17c892a620ea/base_prod.min.css?20250837-r20260914-ff8ed8a23bb8-17c892a620ea>; rel="preload"; as="style", <https://rsms.me/inter/font-files/InterVariable.woff2?v=4.0>; rel="preload"; as="font"; crossorigin, <https://cdn2.flightera.net/a/5a23be4c5437/app.js?-r20260914-ff8ed8a23bb8-5a23be4c5437>; rel="preload"; as="script"
+Server: cloudflare
+vary: Accept-Encoding
+x-bleriot-route: /:lang/flight/:airline/*flnr
+cf-cache-status: DYNAMIC
+Strict-Transport-Security: max-age=2592000
+Speculation-Rules: "/cdn-cgi/speculation"
+Server-Timing: cfCacheStatus;desc="DYNAMIC"
+Server-Timing: cfEdge;dur=7,cfOrigin;dur=115
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=PVjI%2BJp4UwdUtBg5ZeXO8QbhkC5gmP96qah92Hg69VopX%2FwbCOtLk7dnRTTyx%2Fw0w7GudIBaqMhy0qRYKNCIRMhHp03tepTzo4%2FYaxKNz6uQ7oqK4NLK8g9O9iuMWktxBP1GiSEqJoLzADy%2FByPg"}]}
+CF-RAY: a3b70e41b875ec96-MAD
+alt-svc: h3=":443"; ma=86400
+

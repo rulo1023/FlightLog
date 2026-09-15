@@ -1,0 +1,17 @@
+HTTP/1.1 301 Moved Permanently
+Date: Tue, 15 Sep 2026 10:52:37 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+link: <https://cdn2.flightera.net/a/17c892a620ea/base_prod.min.css?20250837-r20260914-ff8ed8a23bb8-17c892a620ea>; rel="preload"; as="style", <https://rsms.me/inter/font-files/InterVariable.woff2?v=4.0>; rel="preload"; as="font"; crossorigin, <https://cdn2.flightera.net/a/5a23be4c5437/app.js?-r20260914-ff8ed8a23bb8-5a23be4c5437>; rel="preload"; as="script"
+location: /en/flight/Vueling-Malaga-Bilbao/VY2616
+Server: cloudflare
+x-bleriot-route: /:lang/flight/:airline
+cf-cache-status: DYNAMIC
+Strict-Transport-Security: max-age=2592000
+Speculation-Rules: "/cdn-cgi/speculation"
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=XCw5yCIBBWUuWJw8Z79Adq%2F2fuNyDX1biQlvSiUud%2Bhu19Pfy6qMwU6ycoqMaYCFC6oMtacaZmerfmo7cUJyq7%2B1IywhR1iCK3laJIyuHU0%2F1KGA3nvj8qMYNLhivMWYNyR5LCIrscpYDXnCqAlh"}]}
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+CF-RAY: a3b7153bdd2ccc67-MAD
+alt-svc: h3=":443"; ma=86400
+

@@ -1,10 +1,3 @@
-import { AircraftModelPicker } from './src/components/AircraftModelPicker';
-import { FlightRouteMap } from './src/components/FlightRouteMap';
-import { FlighteraProbe } from './src/components/FlighteraProbe';
-import {
-  isRecentPlaneFinderDate,
-  PlaneFinderProbe,
-} from './src/components/PlaneFinderProbe';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Session } from '@supabase/supabase-js';
@@ -25,45 +18,6 @@ import { applySuggestion, canLookup, lookupFlight, LookupSuggestion, normalizedF
 import { colors } from './src/theme';
 
 type Page = 'list' | 'edit';
-
-function effectiveFlightStatus(
-  flight: Flight,
-): 'flown' | 'planned' {
-  const today = localDateKey(new Date());
-
-  if (flight.flight_date < today) {
-    return 'flown';
-  }
-
-  if (flight.flight_date > today) {
-    return 'planned';
-  }
-
-  return flight.actual_arrival_at
-    ? 'flown'
-    : 'planned';
-}
-
-function draftAutomaticStatus(
-  date: Date,
-  actualArrivalAt?: string,
-): 'flown' | 'planned' {
-  const selected = localDateKey(date);
-  const today = localDateKey(new Date());
-
-  if (selected < today) {
-    return 'flown';
-  }
-
-  if (selected > today) {
-    return 'planned';
-  }
-
-  return actualArrivalAt
-    ? 'flown'
-    : 'planned';
-}
-
 
 function ActionButton({ label, onPress, secondary = false, disabled = false, icon }: {
   label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
@@ -175,23 +129,11 @@ function AuthScreen() {
   );
 }
 
-function FlightCard({
-  flight,
-  onPress,
-  onLongPress,
-}: {
-  flight: Flight;
-  onPress: () => void;
-  onLongPress: () => void;
-}) {
+function FlightCard({ flight, onPress }: { flight: Flight; onPress: () => void }) {
   const route = [flight.departure_airport_code, flight.arrival_airport_code];
-  const status = effectiveFlightStatus(flight);
   const hasRoute = route.every(Boolean);
   return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
-      delayLongPress={550} style={({ pressed }) => [styles.flightCard, pressed && styles.buttonDimmed]} accessibilityRole="button">
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.flightCard, pressed && styles.buttonDimmed]} accessibilityRole="button">
       <View style={styles.flightTop}>
         <View style={styles.flightNumberPill}><Text style={styles.flightNumberText}>{flight.flight_number}</Text></View>
         <Text style={styles.flightDate}>{shortDateLabel(flight.flight_date)}</Text>
@@ -203,45 +145,21 @@ function FlightCard({
       </View>
       <View style={styles.flightBottom}>
         <Text style={styles.flightMeta}>{flight.airline_name || (hasRoute ? 'Vuelo guardado' : 'Añade la ruta cuando quieras')}</Text>
-        <View style={[styles.statusPill, status === 'planned' && styles.statusPlanned]}>
-          <Text style={styles.statusText}>{status === 'planned' ? 'Previsto' : 'Realizado'}</Text>
+        <View style={[styles.statusPill, flight.status === 'planned' && styles.statusPlanned]}>
+          <Text style={styles.statusText}>{flight.status === 'planned' ? 'Previsto' : 'Realizado'}</Text>
         </View>
       </View>
     </Pressable>
   );
 }
 
-function ListScreen({ flights, loading, onRefresh, onAdd, onEdit, onDelete, onSignOut }: {
+function ListScreen({ flights, loading, onRefresh, onAdd, onEdit, onSignOut }: {
   flights: Flight[]; loading: boolean; onRefresh: () => void; onAdd: () => void;
-  onEdit: (flight: Flight) => void;
-  onDelete: (flight: Flight) => void;
-  onSignOut: () => void;
+  onEdit: (flight: Flight) => void; onSignOut: () => void;
 }) {
-  const completed = flights.filter((flight) => effectiveFlightStatus(flight) === 'flown');
+  const completed = flights.filter((flight) => flight.status === 'flown');
   const minutes = completed.reduce((sum, flight) => sum + (flight.duration_minutes ?? 0), 0);
-  
-  function confirmListDelete(
-    flight: Flight,
-  ) {
-    Alert.alert(
-      'Eliminar vuelo',
-      `Se eliminar? ${flight.flight_number}. Esta acci?n no se puede deshacer.`,
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel',
-        },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () =>
-            onDelete(flight),
-        },
-      ],
-    );
-  }
-
-return (
+  return (
     <View style={styles.flex}>
       <ScrollView contentContainerStyle={styles.listContent}>
         <View style={styles.headerRow}>
@@ -260,61 +178,13 @@ return (
           <View style={styles.statCard}><Text style={styles.statValue}>{Math.floor(minutes / 60)} h</Text><Text style={styles.statLabel}>en el aire*</Text></View>
         </View>
         <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Todos los vuelos</Text><Pressable onPress={onRefresh}><Ionicons name="refresh" size={20} color={colors.primary} /></Pressable></View>
-        {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : flights.length ? flights.map((flight) => <FlightCard
-              key={flight.id}
-              flight={flight}
-              onPress={() => onEdit(flight)}
-              onLongPress={() =>
-                confirmListDelete(flight)
-              }
-            />) : (
+        {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : flights.length ? flights.map((flight) => <FlightCard key={flight.id} flight={flight} onPress={() => onEdit(flight)} />) : (
           <View style={styles.emptyCard}><Ionicons name="ticket-outline" size={30} color={colors.primary} /><Text style={styles.emptyTitle}>Tu diario empieza aquí</Text><Text style={styles.bodyCentered}>Solo necesitas un número de vuelo y una fecha para guardar el primero.</Text></View>
         )}
         <Text style={styles.footnote}>* Se suma la duración que hayas introducido en vuelos realizados.</Text>
       </ScrollView>
     </View>
   );
-}
-
-
-function actualIsoFromScheduled(
-  scheduled: string,
-  actualTime?: string,
-): string {
-  if (!scheduled || !actualTime) {
-    return '';
-  }
-
-  const match = scheduled.match(
-    /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2}|Z)$/,
-  );
-
-  if (!match) {
-    return '';
-  }
-
-  return `${match[1]}T${actualTime}:00${match[3]}`;
-}
-
-function minutesBetweenIso(
-  start: string,
-  end: string,
-): string {
-  const a = Date.parse(start);
-  const b = Date.parse(end);
-
-  if (!Number.isFinite(a) || !Number.isFinite(b)) {
-    return '';
-  }
-
-  let minutes = Math.round((b - a) / 60000);
-
-  // llegada pasada medianoche
-  if (minutes < 0) {
-    minutes += 24 * 60;
-  }
-
-  return String(minutes);
 }
 
 function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
@@ -326,39 +196,8 @@ function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showArrivalPicker, setShowArrivalPicker] = useState(false);
   const [suggestions, setSuggestions] = useState<LookupSuggestion[]>([]);
-
-  const [allowPlaneFinderProbe, setAllowPlaneFinderProbe] =
-    useState(false);
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'empty' | 'error'>('idle');
-
-  const [
-    allowFlighteraProbe,
-    setAllowFlighteraProbe,
-  ] = useState(false);
-  
-  // AUTO_STATUS_EFFECT
-  useEffect(() => {
-    setDraft((current) => {
-      const status = draftAutomaticStatus(
-        current.flightDate,
-        current.actualArrivalAt,
-      );
-
-      if (current.status === status) {
-        return current;
-      }
-
-      return {
-        ...current,
-        status,
-      };
-    });
-  }, [
-    draft.flightDate,
-    draft.actualArrivalAt,
-  ]);
-
-const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => setDraft((current) => {
+  const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => setDraft((current) => {
     const fieldSources = { ...current.fieldSources };
     if (field === 'flightNumber') return { ...current, [field]: value, fieldSources: {} };
     delete fieldSources[field];
@@ -378,7 +217,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
     }
 
     setSuggestions([]);
-    setAllowFlighteraProbe(false);
     setLookupState('searching');
 
     try {
@@ -399,35 +237,17 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
       );
 
       setSuggestions(results);
-
-    if (results.length > 0) {
-      setAllowFlighteraProbe(true);
-    }
       setLookupState(results.length ? 'idle' : 'empty');
     } catch (error) {
-      setAllowFlighteraProbe(false);
-
       console.error('ERROR FLIGHT LOOKUP:', error);
       setLookupState('error');
     }
   }
 
   function chooseSuggestion(item: LookupSuggestion) {
-    const nextDraft = applySuggestion(draft, item);
-
-    setDraft(nextDraft);
+    setDraft((current) => applySuggestion(current, item));
     setSuggestions([]);
     setDetails(true);
-
-    const dateKey = localDateKey(nextDraft.flightDate);
-
-    setAllowPlaneFinderProbe(
-      isRecentPlaneFinderDate(dateKey) &&
-      Boolean(nextDraft.flightNumber) &&
-      Boolean(nextDraft.departureCode) &&
-      Boolean(nextDraft.arrivalCode) &&
-      !nextDraft.registration
-    );
   }
 
   function save() {
@@ -445,145 +265,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {allowPlaneFinderProbe &&
-       draft.flightNumber &&
-       draft.departureCode &&
-       draft.arrivalCode &&
-       (
-        <PlaneFinderProbe
-          flightNumber={draft.flightNumber}
-          flightDate={localDateKey(draft.flightDate)}
-          departureCode={draft.departureCode}
-          arrivalCode={draft.arrivalCode}
-          onData={(data) => {
-            setAllowPlaneFinderProbe(false);
-
-            setDraft((current) => ({
-              ...current,
-              registration:
-                data.registration ||
-                current.registration,
-              aircraftModel:
-                current.aircraftModel ||
-                data.aircraftModel ||
-                '',
-              fieldSources: {
-                ...current.fieldSources,
-                ...(data.registration
-                  ? { registration: 'PlaneFinder' }
-                  : {}),
-                ...(
-                  data.aircraftModel &&
-                  !current.aircraftModel
-                    ? { aircraftModel: 'PlaneFinder' }
-                    : {}
-                ),
-              },
-            }));
-          }}
-          onFinished={() => {
-            setAllowPlaneFinderProbe(false);
-          }}
-        />
-      )}
-
-      {/* FLIGHTERA_LIVE_PROBE */}
-      {allowFlighteraProbe &&
-       draft.departureCode &&
-       draft.flightNumber &&
-       draft.scheduledDepartureAt &&
-       (
-        <FlighteraProbe
-          url={
-            'https://www.flightera.net/en/flight_details/' +
-            normalizedFlightNumber(draft.flightNumber) +
-            '/' +
-            normalizedFlightNumber(draft.flightNumber) +
-            '/' +
-            draft.departureCode +
-            '/' +
-            localDateKey(draft.flightDate)
-          }
-          onData={(data) => {
-            setAllowFlighteraProbe(false);
-
-            setDraft((current) => {
-              const actualDepartureAt =
-                actualIsoFromScheduled(
-                  current.scheduledDepartureAt,
-                  data.actualDepartureTime,
-                );
-
-              const actualArrivalAt =
-                actualIsoFromScheduled(
-                  current.scheduledArrivalAt,
-                  data.actualArrivalTime,
-                );
-
-              const realDuration =
-                actualDepartureAt &&
-                actualArrivalAt
-                  ? minutesBetweenIso(
-                      actualDepartureAt,
-                      actualArrivalAt,
-                    )
-                  : current.durationMinutes;
-
-              return {
-                ...current,
-
-                actualDepartureAt:
-                  actualDepartureAt ||
-                  current.actualDepartureAt,
-
-                actualArrivalAt:
-                  actualArrivalAt ||
-                  current.actualArrivalAt,
-
-                durationMinutes:
-                  realDuration,
-
-                fieldSources: {
-                  ...current.fieldSources,
-
-                  ...(actualDepartureAt
-                    ? {
-                        actualDepartureAt:
-                          'Flightera',
-                      }
-                    : {}),
-
-                  ...(actualArrivalAt
-                    ? {
-                        actualArrivalAt:
-                          'Flightera',
-                      }
-                    : {}),
-
-                  ...(actualDepartureAt &&
-                     actualArrivalAt
-                    ? {
-                        durationMinutes:
-                          'Flightera:actual',
-                      }
-                    : {}),
-                },
-              };
-            });
-          }}
-        />
-      )}
-
-      <FlighteraProbe
-        url="https://www.flightera.net/en/flight_details/VY2616/VY2616/AGP/2026-09-14"
-        onData={(data) => {
-          console.log(
-            'FLIGHTERA PROBE RESULT:',
-            JSON.stringify(data, null, 2),
-          );
-        }}
-      />
-
       <ScrollView contentContainerStyle={styles.editContent} keyboardShouldPersistTaps="handled">
         <View style={styles.headerRow}>
           <Pressable onPress={onBack} style={styles.iconButton} accessibilityLabel="Volver"><Ionicons name="arrow-back" size={23} color={colors.ink} /></Pressable>
@@ -596,27 +277,10 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
           <InputField label="Número de vuelo" value={draft.flightNumber} onChangeText={(value) => set('flightNumber', value)} placeholder="Por ejemplo, IB3170" autoCapitalize="characters" maxLength={12} />
           <Text style={styles.fieldLabel}>Fecha de salida</Text>
           <Pressable onPress={() => setShowDatePicker(true)} style={styles.dateButton}><Ionicons name="calendar-outline" size={20} color={colors.primary} /><Text style={styles.dateText}>{dateLabel(localDateKey(draft.flightDate))}</Text></Pressable>
-          {showDatePicker && (
-            <DateTimePicker
-              value={draft.flightDate}
-              mode="date"
-              display="default"
-              onValueChange={(_, date) => {
-                if (date) {
-                  setDraft((current) => ({
-                    ...current,
-                    flightDate: date,
-                    fieldSources: {},
-                  }));
-                }
-
-                setShowDatePicker(false);
-              }}
-              onDismiss={() =>
-                setShowDatePicker(false)
-              }
-            />
-          )}
+          {showDatePicker && <DateTimePicker value={draft.flightDate} mode="date" display="default" onChange={(_, date) => {
+            setShowDatePicker(false);
+            if (date) setDraft((current) => ({ ...current, flightDate: date, fieldSources: {}, status: localDateKey(date) < localDateKey(new Date()) ? 'flown' : 'planned' }));
+          }} />}
           <ActionButton
             label={lookupState === 'searching' ? 'Buscando vuelo�' : 'Buscar datos del vuelo'}
             onPress={searchFlight}
@@ -635,28 +299,10 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
           </View>}
           {lookupState === 'empty' && <Text style={styles.lookupText}>No encontramos datos para este número y fecha. Puedes completar el vuelo a mano.</Text>}
           {lookupState === 'error' && <Text style={styles.lookupText}>La búsqueda no está disponible ahora. Puedes completar el vuelo a mano.</Text>}
-          <Text style={styles.fieldLabel}>
-            Estado
-          </Text>
-
-          <View
-            style={[
-              styles.statusPill,
-              draft.status === 'planned' &&
-                styles.statusPlanned,
-              {
-                alignSelf: 'flex-start',
-                marginBottom: 4,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-              },
-            ]}
-          >
-            <Text style={styles.statusText}>
-              {draft.status === 'planned'
-                ? 'Previsto'
-                : 'Realizado'}
-            </Text>
+          <Text style={styles.fieldLabel}>Estado</Text>
+          <View style={styles.segmentRow}>
+            <Pressable onPress={() => set('status', 'flown')} style={[styles.segment, draft.status === 'flown' && styles.segmentActive]}><Text style={[styles.segmentText, draft.status === 'flown' && styles.segmentTextActive]}>Realizado</Text></Pressable>
+            <Pressable onPress={() => set('status', 'planned')} style={[styles.segment, draft.status === 'planned' && styles.segmentActive]}><Text style={[styles.segmentText, draft.status === 'planned' && styles.segmentTextActive]}>Previsto</Text></Pressable>
           </View>
         </View>
         <Pressable onPress={() => setDetails(!details)} style={styles.expandButton}>
@@ -673,178 +319,18 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
             <InputField label="Nombre aeropuerto de salida" value={draft.departureName} onChangeText={(value) => set('departureName', value)} placeholder="Opcional" />
             <InputField label="Nombre aeropuerto de llegada" value={draft.arrivalName} onChangeText={(value) => set('arrivalName', value)} placeholder="Opcional" />
             <View style={styles.twoCols}>
-              <View style={styles.col}>
-                <InputField
-                  label="Hora de salida"
-                  value={draft.departureTime}
-                  onChangeText={(value) =>
-                    set('departureTime', value)
-                  }
-                  placeholder="HH:mm"
-                  keyboardType="numeric"
-                  maxLength={5}
-                />
-              </View>
-
-              <View style={styles.col}>
-                <InputField
-                  label="Hora de llegada"
-                  value={draft.arrivalTime}
-                  onChangeText={(value) =>
-                    set('arrivalTime', value)
-                  }
-                  placeholder="HH:mm"
-                  keyboardType="numeric"
-                  maxLength={5}
-                />
-              </View>
+              <View style={styles.col}><InputField label="Hora de salida" value={draft.departureTime} onChangeText={(value) => set('departureTime', value)} placeholder="HH:mm" keyboardType="numeric" maxLength={5} /></View>
+              <View style={styles.col}><InputField label="Hora de llegada" value={draft.arrivalTime} onChangeText={(value) => set('arrivalTime', value)} placeholder="HH:mm" keyboardType="numeric" maxLength={5} /></View>
             </View>
-
-            {(draft.actualDepartureAt ||
-              draft.actualArrivalAt) && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <View
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#F5F8F7',
-                    borderRadius: 16,
-                    padding: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#687574',
-                      marginBottom: 5,
-                    }}
-                  >
-                    Salida real
-                  </Text>
-
-                  <Text
-                    style={{
-                      fontSize: 24,
-                      fontWeight: '700',
-                      color: '#233130',
-                    }}
-                  >
-                    {draft.actualDepartureAt
-                      ?.match(/T(\d{2}:\d{2})/)?.[1] ||
-                      '--:--'}
-                  </Text>
-                </View>
-
-                <View
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#F5F8F7',
-                    borderRadius: 16,
-                    padding: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#687574',
-                      marginBottom: 5,
-                    }}
-                  >
-                    Llegada real
-                  </Text>
-
-                  <Text
-                    style={{
-                      fontSize: 24,
-                      fontWeight: '700',
-                      color: '#233130',
-                    }}
-                  >
-                    {draft.actualArrivalAt
-                      ?.match(/T(\d{2}:\d{2})/)?.[1] ||
-                      '--:--'}
-                  </Text>
-                </View>
-              </View>
-            )}
-
             <Text style={styles.fieldLabel}>Fecha de llegada</Text>
             <Pressable onPress={() => setShowArrivalPicker(true)} style={styles.dateButton}><Ionicons name="calendar-outline" size={20} color={colors.primary} /><Text style={styles.dateText}>{draft.arrivalDate ? dateLabel(draft.arrivalDate) : 'Sin especificar'}</Text></Pressable>
-            {showArrivalPicker && (
-              <DateTimePicker
-                value={
-                  draft.arrivalDate
-                    ? new Date(
-                        `${draft.arrivalDate}T12:00:00`,
-                      )
-                    : draft.flightDate
-                }
-                mode="date"
-                display="default"
-                onValueChange={(_, date) => {
-                  if (date) {
-                    set(
-                      'arrivalDate',
-                      localDateKey(date),
-                    );
-                  }
-
-                  setShowArrivalPicker(false);
-                }}
-                onDismiss={() =>
-                  setShowArrivalPicker(false)
-                }
-              />
-            )}
+            {showArrivalPicker && <DateTimePicker value={draft.arrivalDate ? new Date(`${draft.arrivalDate}T12:00:00`) : draft.flightDate} mode="date" display="default" onChange={(_, date) => { setShowArrivalPicker(false); if (date) set('arrivalDate', localDateKey(date)); }} />}
             {Boolean(draft.arrivalDate) && <Pressable onPress={() => set('arrivalDate', '')}><Text style={styles.linkText}>Quitar fecha de llegada</Text></Pressable>}
             <InputField label="Duración en minutos" value={draft.durationMinutes} onChangeText={(value) => set('durationMinutes', value)} placeholder="Por ejemplo, 145" keyboardType="numeric" hint="Se usa para sumar tu tiempo en el aire." />
-
-            {draft.distanceKm ? (
-              <View
-                style={{
-                  marginTop: 16,
-                  marginBottom: 4,
-                  backgroundColor: '#F5F8F7',
-                  borderRadius: 16,
-                  padding: 16,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    color: '#687574',
-                    marginBottom: 5,
-                  }}
-                >
-                  Distancia del vuelo
-                </Text>
-
-                <Text
-                  style={{
-                    fontSize: 24,
-                    fontWeight: '700',
-                    color: '#233130',
-                  }}
-                >
-                  {draft.distanceKm} km
-                </Text>
-              </View>
-            ) : null}
-
           </View>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>A bordo</Text>
-            <AircraftModelPicker
-              value={draft.aircraftModel}
-              onChange={(value) =>
-                set('aircraftModel', value)
-              }
-            />
+            <InputField label="Modelo de avión" value={draft.aircraftModel} onChangeText={(value) => set('aircraftModel', value)} placeholder="Por ejemplo, Airbus A320" />
             <InputField label="Matrícula" value={draft.registration} onChangeText={(value) => set('registration', value)} placeholder="Por ejemplo, EC-MXY" autoCapitalize="characters" />
             <View style={styles.twoCols}>
               <View style={styles.col}><InputField label="Asiento" value={draft.seat} onChangeText={(value) => set('seat', value)} placeholder="12A" autoCapitalize="characters" /></View>
@@ -911,35 +397,6 @@ export default function App() {
     } finally { setSaving(false); }
   }
 
-  async function removeFlightFromList(
-    flight: Flight,
-  ) {
-    if (!supabase || !session) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('flights')
-        .delete()
-        .eq('id', flight.id)
-        .eq('user_id', session.user.id);
-
-      if (error) {
-        throw error;
-      }
-
-      await loadFlights();
-    } catch (error) {
-      Alert.alert(
-        'No se pudo eliminar',
-        error instanceof Error
-          ? error.message
-          : 'Revisa tu conexi?n e int?ntalo de nuevo.',
-      );
-    }
-  }
-
   async function remove() {
     if (!supabase || !session || !editing) return;
     setSaving(true);
@@ -960,7 +417,7 @@ export default function App() {
         {!isConfigured ? <SetupScreen /> : booting ? <ActivityIndicator style={styles.centered} color={colors.primary} /> : !session ? <AuthScreen /> : page === 'edit' ? (
           <EditScreen key={editing?.id ?? 'new'} initial={editing} onSave={save} onDelete={remove} onBack={back} busy={saving} />
         ) : (
-          <ListScreen flights={flights} loading={loading} onRefresh={() => void loadFlights()} onAdd={openNew} onEdit={openEdit} onDelete={removeFlightFromList} onSignOut={() => void supabase?.auth.signOut()} />
+          <ListScreen flights={flights} loading={loading} onRefresh={() => void loadFlights()} onAdd={openNew} onEdit={openEdit} onSignOut={() => void supabase?.auth.signOut()} />
         )}
       </SafeAreaView>
     </SafeAreaProvider>

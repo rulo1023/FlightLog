@@ -1,0 +1,19 @@
+HTTP/1.1 303 See Other
+Date: Tue, 15 Sep 2026 10:45:39 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+link: <https://cdn2.flightera.net/a/17c892a620ea/base_prod.min.css?20250837-r20260914-ff8ed8a23bb8-17c892a620ea>; rel="preload"; as="style", <https://rsms.me/inter/font-files/InterVariable.woff2?v=4.0>; rel="preload"; as="font"; crossorigin, <https://cdn2.flightera.net/a/5a23be4c5437/app.js?-r20260914-ff8ed8a23bb8-5a23be4c5437>; rel="preload"; as="script"
+location: https://www.flightera.net/en/flight/VY2616
+Server: cloudflare
+x-bleriot-route: /:lang/search
+cf-cache-status: DYNAMIC
+Strict-Transport-Security: max-age=2592000
+Speculation-Rules: "/cdn-cgi/speculation"
+Server-Timing: cfCacheStatus;desc="DYNAMIC"
+Server-Timing: cfEdge;dur=15,cfOrigin;dur=333
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=ZORjvTog7taz7wZiVEv0EhyHTT3%2F6KhE6dyWhdbVyOnLZiQ6uBfZNm6243LFsIU1ezPVNOsGa%2FW9Rs0p1z07vlM5fNnGceAR%2BGKU64m1fJllsIpNQOxBagzRbpilptI9ASlmZ5pQf7xhKDd1PS4c"}]}
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+CF-RAY: a3b70b04fc95041c-MAD
+alt-svc: h3=":443"; ma=86400
+

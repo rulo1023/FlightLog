@@ -247,7 +247,7 @@ async function fetchHtml(
     html.length < 100
   ) {
     throw new Error(
-      'Flightera devolvió una respuesta vacía',
+      'Flightera devolviÃ³ una respuesta vacÃ­a',
     );
   }
 
@@ -323,7 +323,7 @@ function extractFlight(
         return flight;
       }
     } catch {
-      // Ignorar JSON-LD inválido.
+      // Ignorar JSON-LD invÃ¡lido.
     }
   }
 
@@ -423,10 +423,10 @@ function parseDistanceKm(
 }
 
 /*
- * Algunos HTML de Flightera incluyen la matrícula directamente
- * y otros la cargan después mediante page_data.
+ * Algunos HTML de Flightera incluyen la matrÃ­cula directamente
+ * y otros la cargan despuÃ©s mediante page_data.
  *
- * Solo usamos lo que ya esté presente en el HTML público.
+ * Solo usamos lo que ya estÃ© presente en el HTML pÃºblico.
  */
 function extractRegistration(
   html: string,
@@ -694,7 +694,7 @@ async function requestFlighteraLookup(
 ): Promise<LookupSuggestion[]> {
   try {
     /*
-     * 1. Resolver el vuelo genérico.
+     * 1. Resolver el vuelo genÃ©rico.
      */
     const genericUrl =
       `${FLIGHTERA_BASE}` +
@@ -724,9 +724,9 @@ async function requestFlighteraLookup(
     /*
      * Para vuelos actuales/futuros:
      *
-     * si la propia página genérica ya corresponde
+     * si la propia pÃ¡gina genÃ©rica ya corresponde
      * exactamente a la fecha pedida, no necesitamos
-     * hacer una segunda resolución.
+     * hacer una segunda resoluciÃ³n.
      */
     if (
       datePart(
@@ -784,7 +784,7 @@ async function requestFlighteraLookup(
     );
 
     /*
-     * Si no aparece enlace explícito, usar el
+     * Si no aparece enlace explÃ­cito, usar el
      * endpoint que ya hemos verificado:
      *
      * /flight_details/VY2616/VY2616/AGP/YYYY-MM-DD

@@ -1,10 +1,5 @@
-import { AircraftModelPicker } from './src/components/AircraftModelPicker';
 import { FlightRouteMap } from './src/components/FlightRouteMap';
 import { FlighteraProbe } from './src/components/FlighteraProbe';
-import {
-  isRecentPlaneFinderDate,
-  PlaneFinderProbe,
-} from './src/components/PlaneFinderProbe';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Session } from '@supabase/supabase-js';
@@ -326,15 +321,7 @@ function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showArrivalPicker, setShowArrivalPicker] = useState(false);
   const [suggestions, setSuggestions] = useState<LookupSuggestion[]>([]);
-
-  const [allowPlaneFinderProbe, setAllowPlaneFinderProbe] =
-    useState(false);
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'empty' | 'error'>('idle');
-
-  const [
-    allowFlighteraProbe,
-    setAllowFlighteraProbe,
-  ] = useState(false);
   
   // AUTO_STATUS_EFFECT
   useEffect(() => {
@@ -378,7 +365,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
     }
 
     setSuggestions([]);
-    setAllowFlighteraProbe(false);
     setLookupState('searching');
 
     try {
@@ -399,35 +385,17 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
       );
 
       setSuggestions(results);
-
-    if (results.length > 0) {
-      setAllowFlighteraProbe(true);
-    }
       setLookupState(results.length ? 'idle' : 'empty');
     } catch (error) {
-      setAllowFlighteraProbe(false);
-
       console.error('ERROR FLIGHT LOOKUP:', error);
       setLookupState('error');
     }
   }
 
   function chooseSuggestion(item: LookupSuggestion) {
-    const nextDraft = applySuggestion(draft, item);
-
-    setDraft(nextDraft);
+    setDraft((current) => applySuggestion(current, item));
     setSuggestions([]);
     setDetails(true);
-
-    const dateKey = localDateKey(nextDraft.flightDate);
-
-    setAllowPlaneFinderProbe(
-      isRecentPlaneFinderDate(dateKey) &&
-      Boolean(nextDraft.flightNumber) &&
-      Boolean(nextDraft.departureCode) &&
-      Boolean(nextDraft.arrivalCode) &&
-      !nextDraft.registration
-    );
   }
 
   function save() {
@@ -445,51 +413,8 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {allowPlaneFinderProbe &&
-       draft.flightNumber &&
-       draft.departureCode &&
-       draft.arrivalCode &&
-       (
-        <PlaneFinderProbe
-          flightNumber={draft.flightNumber}
-          flightDate={localDateKey(draft.flightDate)}
-          departureCode={draft.departureCode}
-          arrivalCode={draft.arrivalCode}
-          onData={(data) => {
-            setAllowPlaneFinderProbe(false);
-
-            setDraft((current) => ({
-              ...current,
-              registration:
-                data.registration ||
-                current.registration,
-              aircraftModel:
-                current.aircraftModel ||
-                data.aircraftModel ||
-                '',
-              fieldSources: {
-                ...current.fieldSources,
-                ...(data.registration
-                  ? { registration: 'PlaneFinder' }
-                  : {}),
-                ...(
-                  data.aircraftModel &&
-                  !current.aircraftModel
-                    ? { aircraftModel: 'PlaneFinder' }
-                    : {}
-                ),
-              },
-            }));
-          }}
-          onFinished={() => {
-            setAllowPlaneFinderProbe(false);
-          }}
-        />
-      )}
-
       {/* FLIGHTERA_LIVE_PROBE */}
-      {allowFlighteraProbe &&
-       draft.departureCode &&
+      {draft.departureCode &&
        draft.flightNumber &&
        draft.scheduledDepartureAt &&
        (
@@ -505,8 +430,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
             localDateKey(draft.flightDate)
           }
           onData={(data) => {
-            setAllowFlighteraProbe(false);
-
             setDraft((current) => {
               const actualDepartureAt =
                 actualIsoFromScheduled(
@@ -839,12 +762,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
           </View>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>A bordo</Text>
-            <AircraftModelPicker
-              value={draft.aircraftModel}
-              onChange={(value) =>
-                set('aircraftModel', value)
-              }
-            />
+            <InputField label="Modelo de avión" value={draft.aircraftModel} onChangeText={(value) => set('aircraftModel', value)} placeholder="Por ejemplo, Airbus A320" />
             <InputField label="Matrícula" value={draft.registration} onChangeText={(value) => set('registration', value)} placeholder="Por ejemplo, EC-MXY" autoCapitalize="characters" />
             <View style={styles.twoCols}>
               <View style={styles.col}><InputField label="Asiento" value={draft.seat} onChangeText={(value) => set('seat', value)} placeholder="12A" autoCapitalize="characters" /></View>

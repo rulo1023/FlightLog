@@ -1,10 +1,6 @@
 import { AircraftModelPicker } from './src/components/AircraftModelPicker';
 import { FlightRouteMap } from './src/components/FlightRouteMap';
 import { FlighteraProbe } from './src/components/FlighteraProbe';
-import {
-  isRecentPlaneFinderDate,
-  PlaneFinderProbe,
-} from './src/components/PlaneFinderProbe';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Session } from '@supabase/supabase-js';
@@ -326,9 +322,6 @@ function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showArrivalPicker, setShowArrivalPicker] = useState(false);
   const [suggestions, setSuggestions] = useState<LookupSuggestion[]>([]);
-
-  const [allowPlaneFinderProbe, setAllowPlaneFinderProbe] =
-    useState(false);
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'empty' | 'error'>('idle');
 
   const [
@@ -413,21 +406,9 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
   }
 
   function chooseSuggestion(item: LookupSuggestion) {
-    const nextDraft = applySuggestion(draft, item);
-
-    setDraft(nextDraft);
+    setDraft((current) => applySuggestion(current, item));
     setSuggestions([]);
     setDetails(true);
-
-    const dateKey = localDateKey(nextDraft.flightDate);
-
-    setAllowPlaneFinderProbe(
-      isRecentPlaneFinderDate(dateKey) &&
-      Boolean(nextDraft.flightNumber) &&
-      Boolean(nextDraft.departureCode) &&
-      Boolean(nextDraft.arrivalCode) &&
-      !nextDraft.registration
-    );
   }
 
   function save() {
@@ -445,48 +426,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {allowPlaneFinderProbe &&
-       draft.flightNumber &&
-       draft.departureCode &&
-       draft.arrivalCode &&
-       (
-        <PlaneFinderProbe
-          flightNumber={draft.flightNumber}
-          flightDate={localDateKey(draft.flightDate)}
-          departureCode={draft.departureCode}
-          arrivalCode={draft.arrivalCode}
-          onData={(data) => {
-            setAllowPlaneFinderProbe(false);
-
-            setDraft((current) => ({
-              ...current,
-              registration:
-                data.registration ||
-                current.registration,
-              aircraftModel:
-                current.aircraftModel ||
-                data.aircraftModel ||
-                '',
-              fieldSources: {
-                ...current.fieldSources,
-                ...(data.registration
-                  ? { registration: 'PlaneFinder' }
-                  : {}),
-                ...(
-                  data.aircraftModel &&
-                  !current.aircraftModel
-                    ? { aircraftModel: 'PlaneFinder' }
-                    : {}
-                ),
-              },
-            }));
-          }}
-          onFinished={() => {
-            setAllowPlaneFinderProbe(false);
-          }}
-        />
-      )}
-
       {/* FLIGHTERA_LIVE_PROBE */}
       {allowFlighteraProbe &&
        draft.departureCode &&

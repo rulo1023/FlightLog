@@ -15,6 +15,11 @@ export type Flight = {
   arrival_date: string | null;
   arrival_time_local: string | null;
   duration_minutes: number | null;
+  distance_km: number | null;
+  scheduled_departure_at: string | null;
+  actual_departure_at: string | null;
+  scheduled_arrival_at: string | null;
+  actual_arrival_at: string | null;
   aircraft_model: string | null;
   aircraft_registration: string | null;
   seat: string | null;
@@ -37,6 +42,11 @@ export type FlightDraft = {
   arrivalDate: string;
   arrivalTime: string;
   durationMinutes: string;
+  distanceKm: string;
+  scheduledDepartureAt: string;
+  actualDepartureAt: string;
+  scheduledArrivalAt: string;
+  actualArrivalAt: string;
   aircraftModel: string;
   registration: string;
   seat: string;
@@ -84,7 +94,10 @@ export function blankDraft(): FlightDraft {
     flightNumber: '', flightDate: date,
     status: 'planned', airlineName: '', departureCode: '', departureName: '',
     arrivalCode: '', arrivalName: '', departureTime: '', arrivalDate: '',
-    arrivalTime: '', durationMinutes: '', aircraftModel: '', registration: '',
+    arrivalTime: '', durationMinutes: '', distanceKm: '',
+    scheduledDepartureAt: '', actualDepartureAt: '',
+    scheduledArrivalAt: '', actualArrivalAt: '',
+    aircraftModel: '', registration: '',
     seat: '', cabinClass: '', notes: '', fieldSources: {},
   };
 }
@@ -103,6 +116,11 @@ export function flightToDraft(flight: Flight): FlightDraft {
     arrivalDate: flight.arrival_date ?? '',
     arrivalTime: flight.arrival_time_local?.slice(0, 5) ?? '',
     durationMinutes: flight.duration_minutes?.toString() ?? '',
+    distanceKm: flight.distance_km?.toString() ?? '',
+    scheduledDepartureAt: flight.scheduled_departure_at ?? '',
+    actualDepartureAt: flight.actual_departure_at ?? '',
+    scheduledArrivalAt: flight.scheduled_arrival_at ?? '',
+    actualArrivalAt: flight.actual_arrival_at ?? '',
     aircraftModel: flight.aircraft_model ?? '',
     registration: flight.aircraft_registration ?? '',
     seat: flight.seat ?? '',
@@ -163,6 +181,11 @@ export function draftToRow(draft: FlightDraft, userId: string) {
     arrival_date: optional(draft.arrivalDate),
     arrival_time_local: optional(draft.arrivalTime),
     duration_minutes: draft.durationMinutes ? Number(draft.durationMinutes) : null,
+    distance_km: draft.distanceKm ? Number(draft.distanceKm) : null,
+    scheduled_departure_at: optional(draft.scheduledDepartureAt),
+    actual_departure_at: optional(draft.actualDepartureAt),
+    scheduled_arrival_at: optional(draft.scheduledArrivalAt),
+    actual_arrival_at: optional(draft.actualArrivalAt),
     aircraft_model: optional(draft.aircraftModel),
     aircraft_registration: optionalUpper(draft.registration),
     seat: optionalUpper(draft.seat),
