@@ -7,7 +7,11 @@
     "scheme": "flightlog",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "com.rulo1023.flightlog"
+      "package": "com.rulo1023.flightlog",
+      "adaptiveIcon": {
+        "foregroundImage": "./icon.png",
+        "backgroundColor": "#087BCB"
+      }
     },
     "plugins": [
       "expo-dev-client",

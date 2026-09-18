@@ -41,6 +41,66 @@ function isTabPage(page: Page): page is TabPage {
   return tabPages.includes(page as TabPage);
 }
 
+function draftWithCalculatedArrival(draft: FlightDraft): FlightDraft {
+  if (draft.arrivalTime) return draft;
+  const arrival = calculatedArrival(
+    localDateKey(draft.flightDate),
+    draft.departureTime,
+    draft.durationMinutes,
+    draft.departureCode,
+    draft.arrivalCode,
+  );
+  if (!arrival) return draft;
+  return {
+    ...draft,
+    arrivalTime: arrival.time,
+    arrivalDate: draft.arrivalDate || arrival.date,
+    fieldSources: {
+      ...draft.fieldSources,
+      arrivalTime: calculatedArrivalSource,
+      ...(!draft.arrivalDate ? { arrivalDate: calculatedArrivalSource } : {}),
+    },
+  };
+}
+
+function flightWithCalculatedArrival(flight: Flight) {
+  if (flight.arrival_time_local || flight.duration_minutes == null) return null;
+  const departureAirport = getAirport(flight.departure_airport_code);
+  const scheduledDeparture = localDateTimeParts(
+    flight.scheduled_departure_at,
+    departureAirport?.timeZone,
+  );
+  const departureTime = flight.departure_time_local?.slice(0, 5) || scheduledDeparture?.time || '';
+  const departureDate = scheduledDeparture?.date || flight.flight_date;
+  const arrival = calculatedArrival(
+    departureDate,
+    departureTime,
+    flight.duration_minutes,
+    flight.departure_airport_code || '',
+    flight.arrival_airport_code || '',
+  );
+  if (!arrival) return null;
+  const fieldSources = {
+    ...(flight.field_sources ?? {}),
+    arrivalTime: calculatedArrivalSource,
+    ...(!flight.arrival_date ? { arrivalDate: calculatedArrivalSource } : {}),
+  };
+  const arrivalDate = flight.arrival_date || arrival.date;
+  return {
+    flight: {
+      ...flight,
+      arrival_time_local: arrival.time,
+      arrival_date: arrivalDate,
+      field_sources: fieldSources,
+    },
+    patch: {
+      arrival_time_local: arrival.time,
+      arrival_date: arrivalDate,
+      field_sources: fieldSources,
+    },
+  };
+}
+
 let colors: ThemeColors = lightColors;
 let styles = createStyles(colors);
 
@@ -608,9 +668,10 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
   }
 
   function save() {
-    const error = validateDraft(draft);
+    const completedDraft = draftWithCalculatedArrival(draft);
+    const error = validateDraft(completedDraft);
     if (error) { Alert.alert('Revisa el vuelo', error); return; }
-    onSave(draft);
+    onSave(completedDraft);
   }
 
   function confirmDelete() {
@@ -908,7 +969,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                   placeholder="HH:mm"
                   keyboardType="numeric"
                   maxLength={5}
-                  hint={draft.fieldSources.arrivalTime === calculatedArrivalSource ? 'Calculada con la salida y la duración. Si reconocemos ambos aeropuertos, ajustamos también sus zonas horarias.' : undefined}
                 />
               </View>
             </View>
@@ -1160,11 +1220,32 @@ export default function App() {
 
   const loadFlights = useCallback(async () => {
     if (!supabase || !session) return;
+    const client = supabase;
+    const userId = session.user.id;
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('flights').select('*').order('flight_date', { ascending: false }).order('created_at', { ascending: false });
+      const { data, error } = await client.from('flights').select('*').order('flight_date', { ascending: false }).order('created_at', { ascending: false });
       if (error) throw error;
-      setFlights((data ?? []) as Flight[]);
+      const loadedFlights = (data ?? []) as Flight[];
+      const completions = loadedFlights
+        .map(flightWithCalculatedArrival)
+        .filter((completion): completion is NonNullable<typeof completion> => Boolean(completion));
+      const completedById = new Map(completions.map((completion) => [completion.flight.id, completion.flight]));
+      setFlights(loadedFlights.map((flight) => completedById.get(flight.id) || flight));
+
+      if (completions.length) {
+        void Promise.allSettled(completions.map(async ({ flight, patch }) => {
+          const { error: updateError } = await client
+            .from('flights')
+            .update({ ...patch, updated_at: new Date().toISOString() })
+            .eq('id', flight.id)
+            .eq('user_id', userId);
+          if (updateError) throw updateError;
+        })).then((results) => {
+          const failed = results.filter((result) => result.status === 'rejected').length;
+          if (failed) console.warn(`No se pudieron completar ${failed} horas de llegada.`);
+        });
+      }
     } catch (error) {
       Alert.alert('No se pudieron cargar los vuelos', error instanceof Error ? error.message : 'Revisa tu conexión e inténtalo de nuevo.');
     } finally { setLoading(false); }
