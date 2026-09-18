@@ -8,6 +8,8 @@ export type FlighteraLiveData = {
   actualArrivalTime?: string;
   departureDelayMinutes?: number;
   arrivalDelayMinutes?: number;
+  aircraftModel?: string;
+  registration?: string;
 };
 
 type Props = {
@@ -79,11 +81,66 @@ export function FlighteraProbe({
         return null;
       }
 
+      function aircraftRegistration(body, html) {
+        var normalizedHtml = (html || '')
+          .replace(/&quot;/gi, '"')
+          .replace(/\\u002D/gi, '-');
+        var jsonMatch = normalizedHtml.match(
+          /"(?:aircraftRegistration|aircraft_registration|registration)"\s*:\s*"([A-Z0-9]{1,3}-[A-Z0-9]{3,6})"/i
+        );
+
+        if (jsonMatch) {
+          return jsonMatch[1].toUpperCase();
+        }
+
+        var labelMatch = (body || '').match(
+          /(?:AIRCRAFT\s+)?REGISTRATION\s*[:\n]?\s*([A-Z0-9]{1,3}-[A-Z0-9]{3,6})/i
+        );
+
+        return labelMatch ? labelMatch[1].toUpperCase() : null;
+      }
+
+      function aircraftModel(body, html) {
+        var normalizedHtml = (html || '')
+          .replace(/&quot;/gi, '"')
+          .replace(/\\\//g, '/');
+        var jsonMatch = normalizedHtml.match(
+          /"(?:aircraftModel|aircraft_model|aircraftType|aircraft_type|model)"\s*:\s*"([^"<>]{2,60})"/i
+        );
+
+        if (jsonMatch) {
+          var jsonValue = jsonMatch[1].replace(/\\u002D/gi, '-').trim();
+          if (/^(?:Airbus|Boeing|Embraer|ATR|Bombardier|De Havilland|Fokker|McDonnell Douglas|COMAC|Sukhoi|A(?:31[89]|32[01]|20N|21N|3(?:2[0-1]|3[0-9]|4[0-9]|5[0-9]))|B(?:7[0-9]{2}|38M)|E(?:1[789]0|19[05])|AT[467]|CRJ)/i.test(jsonValue)) {
+            return jsonValue;
+          }
+        }
+
+        var commonMatch = (body || '').match(
+          /\b(Airbus\s+A\d{3}(?:-\d{2,3})?(?:neo)?|Boeing\s+7\d{2}(?:-\d{2,3})?(?:\s+MAX\s*\d+)?|Embraer\s+(?:E\s*)?\d{3}(?:-E2)?|ATR\s+(?:42|72)(?:-\d{3})?|Bombardier\s+(?:CRJ|Dash)\s*[A-Z0-9-]+|De Havilland\s+(?:Canada\s+)?Dash\s*8[^\n,;]*)\b/i
+        );
+
+        if (commonMatch) {
+          return commonMatch[1].replace(/\s+/g, ' ').trim();
+        }
+
+        var labelMatch = (body || '').match(
+          /AIRCRAFT(?:\s+TYPE|\s+MODEL)?\s*[:\n]?\s*((?:A|B|E|AT|CRJ)[A-Z0-9-]{2,8})\b/i
+        );
+
+        return labelMatch ? labelMatch[1].toUpperCase() : null;
+      }
+
       function send() {
         var departure = hhmm(value('depTimeLiveHB'));
         var arrival = hhmm(value('arrTimeLiveHB'));
+        var body = document.body ? document.body.innerText : '';
+        var html = document.documentElement
+          ? document.documentElement.innerHTML
+          : '';
+        var registration = aircraftRegistration(body, html);
+        var model = aircraftModel(body, html);
 
-        if (!departure && !arrival) {
+        if (!departure && !arrival && !registration && !model) {
           return;
         }
 
@@ -95,6 +152,8 @@ export function FlighteraProbe({
               delayNear('ACTUAL DEPARTURE'),
             arrivalDelayMinutes:
               delayNear('ACTUAL ARRIVAL'),
+            aircraftModel: model,
+            registration: registration,
           })
         );
       }

@@ -15,10 +15,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AIRCRAFT_MODELS } from '../data/aircraftModels';
+import { ThemeColors } from '../theme';
 
 type Props = {
   value: string;
   onChange: (value: string) => void;
+  colors: ThemeColors;
 };
 
 function normalize(value: string) {
@@ -31,7 +33,9 @@ function normalize(value: string) {
 export function AircraftModelPicker({
   value,
   onChange,
+  colors,
 }: Props) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -216,47 +220,48 @@ export function AircraftModelPicker({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 7,
-    color: '#263332',
+    color: colors.ink,
   },
 
   selector: {
     minHeight: 50,
     borderWidth: 1,
-    borderColor: '#D6DFDD',
+    borderColor: colors.line,
     borderRadius: 14,
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     marginBottom: 14,
   },
 
   selectorText: {
     flex: 1,
     fontSize: 16,
-    color: '#233130',
+    color: colors.ink,
   },
 
   placeholder: {
-    color: '#8A9694',
+    color: colors.placeholder,
   },
 
   chevron: {
     fontSize: 28,
     lineHeight: 28,
-    color: '#687574',
+    color: colors.muted,
     marginLeft: 8,
   },
 
   modal: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
   },
 
   header: {
@@ -271,19 +276,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#233130',
+    color: colors.ink,
   },
 
   subtitle: {
     marginTop: 3,
     fontSize: 13,
-    color: '#72807E',
+    color: colors.muted,
   },
 
   close: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#16685A',
+    color: colors.primary,
   },
 
   search: {
@@ -291,10 +296,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     minHeight: 50,
     borderRadius: 14,
-    backgroundColor: '#F3F6F5',
+    backgroundColor: colors.input,
     paddingHorizontal: 15,
     fontSize: 16,
-    color: '#233130',
+    color: colors.ink,
   },
 
   custom: {
@@ -302,19 +307,19 @@ const styles = StyleSheet.create({
     marginVertical: 6,
     padding: 15,
     borderRadius: 14,
-    backgroundColor: '#EAF4F1',
+    backgroundColor: colors.primarySoft,
   },
 
   customTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#155F53',
+    color: colors.primary,
   },
 
   customText: {
     marginTop: 2,
     fontSize: 12,
-    color: '#657471',
+    color: colors.muted,
   },
 
   list: {
@@ -325,7 +330,7 @@ const styles = StyleSheet.create({
   row: {
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E4EAE9',
+    borderBottomColor: colors.line,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -333,7 +338,7 @@ const styles = StyleSheet.create({
   },
 
   rowSelected: {
-    backgroundColor: '#F1F8F6',
+    backgroundColor: colors.primarySoft,
     marginHorizontal: -10,
     paddingHorizontal: 10,
     borderRadius: 10,
@@ -342,19 +347,19 @@ const styles = StyleSheet.create({
   rowText: {
     flex: 1,
     fontSize: 15,
-    color: '#263332',
+    color: colors.ink,
   },
 
   rowTextSelected: {
     fontWeight: '700',
-    color: '#155F53',
+    color: colors.primary,
   },
 
   check: {
     marginLeft: 12,
     fontSize: 18,
     fontWeight: '700',
-    color: '#155F53',
+    color: colors.primary,
   },
 
   empty: {
@@ -365,13 +370,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#263332',
+    color: colors.ink,
   },
 
   emptyText: {
     marginTop: 5,
     fontSize: 13,
-    color: '#72807E',
+    color: colors.muted,
     textAlign: 'center',
   },
-});
+  });
+}

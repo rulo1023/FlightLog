@@ -4,7 +4,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.flights (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  flight_number text not null check (flight_number ~ '^[A-Z0-9]{2,12}$'),
+  flight_number text check (flight_number is null or flight_number ~ '^[A-Z0-9]{2,12}$'),
   flight_date date not null,
   status text not null default 'planned' check (status in ('planned', 'flown')),
   airline_name text,

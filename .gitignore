@@ -1,5 +1,6 @@
 node_modules/
 .expo/
+/.expo-export-check/
 dist/
 .env
 .env.local

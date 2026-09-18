@@ -13,6 +13,12 @@
       "expo-dev-client",
       "@react-native-community/datetimepicker",
       "expo-font"
-    ]
+    ],
+    "icon": "./icon.png",
+    "extra": {
+      "eas": {
+        "projectId": "1e54c537-639a-4749-97f0-533725e5d233"
+      }
+    }
   }
 }

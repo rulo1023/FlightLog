@@ -7,23 +7,42 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Session } from '@supabase/supabase-js';
+import Storage from 'expo-sqlite/kv-store';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable,
-  ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Alert, Animated, BackHandler, Easing, KeyboardAvoidingView, PanResponder, Platform, Pressable,
+  ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  blankDraft, dateLabel, draftToRow, Flight, FlightDraft, flightToDraft,
+  actualScheduleSource, applyActualScheduleToDraft, blankDraft, dateLabel,
+  draftToRow, Flight, FlightDraft, flightNumberLabel, flightToDraft,
   formatDuration, localDateKey, shortDateLabel, validateDraft,
 } from './src/lib/flights';
 import { isConfigured, supabase } from './src/lib/supabase';
 import { applySuggestion, canLookup, lookupFlight, LookupSuggestion, normalizedFlightNumber } from './src/lib/lookup';
-import { colors } from './src/theme';
+import { aircraftAppearance, airlineAppearance } from './src/lib/flightVisuals';
+import { FlightDetailScreen } from './src/components/FlightDetailScreen';
+import { NextFlightCard } from './src/components/NextFlightCard';
+import { GlobalMapScreen } from './src/components/GlobalMapScreen';
+import { AircraftScreen } from './src/components/AircraftScreen';
+import { calculatedArrival, flightDepartureDate, getAirport, localDateTimeParts, routeDistanceKm } from './src/lib/airports';
+import { darkColors, lightColors, ThemeColors } from './src/theme';
 
-type Page = 'list' | 'edit';
+type Page = 'list' | 'detail' | 'edit' | 'map' | 'aircraft' | 'settings';
+type TabPage = 'list' | 'map' | 'aircraft' | 'settings';
+type SortOrder = 'newest' | 'oldest';
+const tabPages: TabPage[] = ['list', 'map', 'aircraft', 'settings'];
+const calculatedArrivalSource = 'Calculado: salida + duración';
+
+function isTabPage(page: Page): page is TabPage {
+  return tabPages.includes(page as TabPage);
+}
+
+let colors: ThemeColors = lightColors;
+let styles = createStyles(colors);
 
 function effectiveFlightStatus(
   flight: Flight,
@@ -75,33 +94,56 @@ function ActionButton({ label, onPress, secondary = false, disabled = false, ico
       disabled={disabled}
       style={({ pressed }) => [styles.button, secondary && styles.buttonSecondary, (disabled || pressed) && styles.buttonDimmed]}
     >
-      {icon && <Ionicons name={icon} size={19} color={secondary ? colors.primary : '#FFFFFF'} />}
+      {icon && <Ionicons name={icon} size={19} color={secondary ? colors.primary : colors.onPrimary} />}
       <Text style={[styles.buttonText, secondary && styles.buttonTextSecondary]}>{label}</Text>
     </Pressable>
   );
 }
 
-function InputField({ label, value, onChangeText, placeholder, autoCapitalize, keyboardType, multiline, hint, maxLength }: {
+function InputField({ label, value, onChangeText, placeholder, autoCapitalize, keyboardType, multiline, hint, maxLength, secureTextEntry, onToggleSecureTextEntry }: {
   label: string; value: string; onChangeText: (value: string) => void; placeholder?: string;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   keyboardType?: 'default' | 'numeric' | 'email-address'; multiline?: boolean;
-  hint?: string; maxLength?: number;
+  hint?: string; maxLength?: number; secureTextEntry?: boolean;
+  onToggleSecureTextEntry?: () => void;
 }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        style={[styles.input, multiline && styles.inputMultiline]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#9AABA9"
-        autoCapitalize={autoCapitalize ?? 'sentences'}
-        autoCorrect={false}
-        keyboardType={keyboardType ?? 'default'}
-        multiline={multiline}
-        maxLength={maxLength}
-      />
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={[
+            styles.input,
+            multiline && styles.inputMultiline,
+            onToggleSecureTextEntry && styles.inputWithAccessory,
+          ]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.placeholder}
+          autoCapitalize={autoCapitalize ?? 'sentences'}
+          autoCorrect={false}
+          keyboardType={keyboardType ?? 'default'}
+          multiline={multiline}
+          maxLength={maxLength}
+          secureTextEntry={secureTextEntry}
+        />
+        {onToggleSecureTextEntry && (
+          <Pressable
+            onPress={onToggleSecureTextEntry}
+            accessibilityRole="button"
+            accessibilityLabel={secureTextEntry ? 'Mostrar contraseña' : 'Ocultar contraseña'}
+            hitSlop={10}
+            style={styles.inputAccessory}
+          >
+            <Ionicons
+              name={secureTextEntry ? 'eye-outline' : 'eye-off-outline'}
+              size={22}
+              color={colors.muted}
+            />
+          </Pressable>
+        )}
+      </View>
       {hint && <Text style={styles.fieldHint}>{hint}</Text>}
     </View>
   );
@@ -124,6 +166,7 @@ function SetupScreen() {
 function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
 
@@ -163,7 +206,15 @@ function AuthScreen() {
         <View style={[styles.card, styles.authCard]}>
           <Text style={styles.sectionTitle}>{mode === 'login' ? 'Qué bueno verte' : 'Empieza tu diario'}</Text>
           <InputField label="Correo electrónico" value={email} onChangeText={setEmail} placeholder="tu@email.com" autoCapitalize="none" keyboardType="email-address" />
-          <InputField label="Contraseña" value={password} onChangeText={setPassword} placeholder="Al menos 6 caracteres" autoCapitalize="none" />
+          <InputField
+            label="Contraseña"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Al menos 6 caracteres"
+            autoCapitalize="none"
+            secureTextEntry={!passwordVisible}
+            onToggleSecureTextEntry={() => setPasswordVisible((current) => !current)}
+          />
           <ActionButton label={busy ? 'Un momento…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'} onPress={submit} disabled={busy} />
           <Pressable onPress={() => setMode(mode === 'login' ? 'signup' : 'login')} style={styles.switchAuth}>
             <Text style={styles.linkText}>{mode === 'login' ? '¿Aún no tienes cuenta? Crear una' : 'Ya tengo cuenta'}</Text>
@@ -186,13 +237,22 @@ function FlightCard({
   const route = [flight.departure_airport_code, flight.arrival_airport_code];
   const status = effectiveFlightStatus(flight);
   const hasRoute = route.every(Boolean);
+  const airline = airlineAppearance(flight.flight_number, flight.airline_name);
+  const aircraft = aircraftAppearance(flight.aircraft_model);
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={550} style={({ pressed }) => [styles.flightCard, pressed && styles.buttonDimmed]} accessibilityRole="button">
       <View style={styles.flightTop}>
-        <View style={styles.flightNumberPill}><Text style={styles.flightNumberText}>{flight.flight_number}</Text></View>
+        <View style={styles.flightIdentity}>
+          <View style={[styles.flightNumberPill, { backgroundColor: airline.background }]}>
+            <Text style={[styles.flightNumberText, { color: airline.text }]}>{flightNumberLabel(flight.flight_number)}</Text>
+          </View>
+          <View style={[styles.aircraftIcon, { backgroundColor: aircraft.background }]}>
+            <Ionicons name="airplane" size={aircraft.iconSize} color={aircraft.color} />
+          </View>
+        </View>
         <Text style={styles.flightDate}>{shortDateLabel(flight.flight_date)}</Text>
       </View>
       <View style={styles.routeRow}>
@@ -201,30 +261,46 @@ function FlightCard({
         <Text style={styles.routeCode}>{hasRoute ? route[1] : 'Llegada'}</Text>
       </View>
       <View style={styles.flightBottom}>
-        <Text style={styles.flightMeta}>{flight.airline_name || (hasRoute ? 'Vuelo guardado' : 'Añade la ruta cuando quieras')}</Text>
-        <View style={[styles.statusPill, status === 'planned' && styles.statusPlanned]}>
-          <Text style={styles.statusText}>{status === 'planned' ? 'Previsto' : 'Realizado'}</Text>
+        <View style={styles.flightDetails}>
+          <Text style={styles.flightMeta}>{flight.airline_name || (hasRoute ? 'Vuelo guardado' : 'Añade la ruta cuando quieras')}</Text>
+          {flight.aircraft_model ? <Text style={[styles.aircraftMeta, { color: aircraft.color }]}>{aircraft.manufacturer} · {aircraft.sizeLabel}</Text> : null}
+        </View>
+        <View style={[styles.statusPill, status === 'planned' ? styles.statusPlanned : styles.statusFlown]}>
+          <Text style={[styles.statusText, status === 'planned' ? styles.statusTextPlanned : styles.statusTextFlown]}>{status === 'planned' ? 'Previsto' : 'Realizado'}</Text>
         </View>
       </View>
     </Pressable>
   );
 }
 
-function ListScreen({ flights, loading, onRefresh, onAdd, onEdit, onDelete, onSignOut }: {
-  flights: Flight[]; loading: boolean; onRefresh: () => void; onAdd: () => void;
-  onEdit: (flight: Flight) => void;
+function ListScreen({ flights, loading, sortOrder, onToggleSort, onRefresh, onOpenDetail, onDelete }: {
+  flights: Flight[]; loading: boolean; onRefresh: () => void;
+  sortOrder: SortOrder; onToggleSort: () => void;
+  onOpenDetail: (flight: Flight) => void;
   onDelete: (flight: Flight) => void;
-  onSignOut: () => void;
 }) {
   const completed = flights.filter((flight) => effectiveFlightStatus(flight) === 'flown');
   const minutes = completed.reduce((sum, flight) => sum + (flight.duration_minutes ?? 0), 0);
+  const distance = completed.reduce((sum, flight) => sum + (Number(flight.distance_km) || routeDistanceKm(getAirport(flight.departure_airport_code), getAirport(flight.arrival_airport_code)) || 0), 0);
+  const airportCount = new Set(flights.flatMap((flight) => [flight.departure_airport_code, flight.arrival_airport_code]).filter(Boolean)).size;
+  const sortedFlights = useMemo(() => [...flights].sort((a, b) => {
+    const dateComparison = a.flight_date.localeCompare(b.flight_date);
+    if (dateComparison !== 0) return sortOrder === 'oldest' ? dateComparison : -dateComparison;
+    return sortOrder === 'oldest'
+      ? a.created_at.localeCompare(b.created_at)
+      : b.created_at.localeCompare(a.created_at);
+  }), [flights, sortOrder]);
+  const nextFlight = useMemo(() => flights
+    .map((flight) => ({ flight, departure: flightDepartureDate(flight) }))
+    .filter((item): item is { flight: Flight; departure: Date } => Boolean(item.departure && item.departure.getTime() > Date.now()))
+    .sort((a, b) => a.departure.getTime() - b.departure.getTime())[0]?.flight ?? null, [flights]);
   
   function confirmListDelete(
     flight: Flight,
   ) {
     Alert.alert(
       'Eliminar vuelo',
-      `Se eliminará ${flight.flight_number}. Esta acción no se puede deshacer.`,
+      `Se eliminará ${flightNumberLabel(flight.flight_number)}. Esta acción no se puede deshacer.`,
       [
         {
           text: 'Cancelar',
@@ -245,36 +321,101 @@ return (
       <ScrollView contentContainerStyle={styles.listContent}>
         <View style={styles.headerRow}>
           <View><Text style={styles.eyebrow}>MI DIARIO DE VIAJE</Text><Text style={styles.bigTitle}>Tus vuelos</Text></View>
-          <Pressable onPress={onSignOut} style={styles.iconButton} accessibilityLabel="Cerrar sesión"><Ionicons name="log-out-outline" size={22} color={colors.muted} /></Pressable>
         </View>
-        <View style={styles.heroCard}>
-          <View style={styles.heroCircle}><Ionicons name="airplane" size={27} color={colors.primary} /></View>
-          <Text style={styles.heroTitle}>Cada viaje cuenta</Text>
-          <Text style={styles.heroText}>Guarda tus vuelos de antes y los que están por venir. Completa los detalles a tu ritmo.</Text>
-          <ActionButton label="Añadir vuelo" onPress={onAdd} icon="add" />
+        <View style={styles.journeySummary}>
+          <View style={styles.journeySummaryTop}><Text style={styles.journeySummaryTitle}>Tu resumen</Text><Text style={styles.journeySummaryMeta}>{completed.length} realizados · {flights.length - completed.length} previstos</Text></View>
+          <View style={styles.journeySummaryGrid}>
+            <View style={styles.journeyMetric}><Text style={styles.journeyMetricValue}>{flights.length}</Text><Text style={styles.journeyMetricLabel}>vuelos</Text></View>
+            <View style={styles.journeyMetric}><Text style={styles.journeyMetricValue}>{formatDuration(minutes) || '0 min'}</Text><Text style={styles.journeyMetricLabel}>en el aire</Text></View>
+            <View style={styles.journeyMetric}><Text style={styles.journeyMetricValue}>{Math.round(distance).toLocaleString('es-ES')}</Text><Text style={styles.journeyMetricLabel}>kilómetros</Text></View>
+            <View style={styles.journeyMetric}><Text style={styles.journeyMetricValue}>{airportCount}</Text><Text style={styles.journeyMetricLabel}>aeropuertos</Text></View>
+          </View>
         </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}><Text style={styles.statValue}>{completed.length}</Text><Text style={styles.statLabel}>realizados</Text></View>
-          <View style={styles.statCard}><Text style={styles.statValue}>{flights.length - completed.length}</Text><Text style={styles.statLabel}>previstos</Text></View>
-          <View style={styles.statCard}><Text style={styles.statValue}>{Math.floor(minutes / 60)} h</Text><Text style={styles.statLabel}>en el aire*</Text></View>
+        {nextFlight ? <NextFlightCard flight={nextFlight} colors={colors} onPress={() => onOpenDetail(nextFlight)} /> : null}
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Todos los vuelos</Text>
+          <View style={styles.listActions}>
+            <Pressable onPress={onToggleSort} style={styles.sortButton} accessibilityLabel="Cambiar orden de los vuelos">
+              <Ionicons name={sortOrder === 'newest' ? 'arrow-down' : 'arrow-up'} size={16} color={colors.primary} />
+              <Text style={styles.sortText}>{sortOrder === 'newest' ? 'Recientes' : 'Antiguos'}</Text>
+            </Pressable>
+            <Pressable onPress={onRefresh} style={styles.refreshButton} accessibilityLabel="Actualizar vuelos"><Ionicons name="refresh" size={20} color={colors.primary} /></Pressable>
+          </View>
         </View>
-        <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Todos los vuelos</Text><Pressable onPress={onRefresh}><Ionicons name="refresh" size={20} color={colors.primary} /></Pressable></View>
-        {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : flights.length ? flights.map((flight) => <FlightCard
+        {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : sortedFlights.length ? sortedFlights.map((flight) => <FlightCard
               key={flight.id}
               flight={flight}
-              onPress={() => onEdit(flight)}
+              onPress={() => onOpenDetail(flight)}
               onLongPress={() =>
                 confirmListDelete(flight)
               }
             />) : (
           <View style={styles.emptyCard}><Ionicons name="ticket-outline" size={30} color={colors.primary} /><Text style={styles.emptyTitle}>Tu diario empieza aquí</Text><Text style={styles.bodyCentered}>Solo necesitas un número de vuelo y una fecha para guardar el primero.</Text></View>
         )}
-        <Text style={styles.footnote}>* Se suma la duración que hayas introducido en vuelos realizados.</Text>
+        <Text style={styles.footnote}>El tiempo y la distancia se calculan con los vuelos realizados que tengan esos datos.</Text>
       </ScrollView>
     </View>
   );
 }
 
+
+function BottomNavigation({ page, onChange, onAdd }: { page: Page; onChange: (page: Page) => void; onAdd: () => void }) {
+  const leftItems: Array<{ page: Page; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+    { page: 'list', label: 'Vuelos', icon: 'airplane-outline' },
+    { page: 'map', label: 'Mapa', icon: 'map-outline' },
+  ];
+  const rightItems: Array<{ page: Page; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+    { page: 'aircraft', label: 'Aviones', icon: 'paper-plane-outline' },
+    { page: 'settings', label: 'Ajustes', icon: 'settings-outline' },
+  ];
+  const item = ({ page: itemPage, label, icon }: typeof leftItems[number]) => {
+    const active = page === itemPage;
+    return <Pressable key={itemPage} onPress={() => onChange(itemPage)} style={styles.bottomNavigationItem} accessibilityRole="tab" accessibilityState={{ selected: active }}><Ionicons name={icon} size={22} color={active ? colors.primary : colors.muted} /><Text style={[styles.bottomNavigationLabel, active && styles.bottomNavigationLabelActive]}>{label}</Text></Pressable>;
+  };
+  return (
+    <View style={styles.bottomNavigation}>
+      {leftItems.map(item)}
+      <Pressable onPress={onAdd} style={({ pressed }) => [styles.addNavigationItem, pressed && styles.addNavigationPressed]} accessibilityRole="button" accessibilityLabel="Añadir vuelo">
+        <View style={styles.addNavigationButton}><Ionicons name="add" size={32} color={colors.onPrimary} /></View>
+        <Text style={styles.addNavigationLabel}>Añadir</Text>
+      </Pressable>
+      {rightItems.map(item)}
+    </View>
+  );
+}
+
+function SettingsScreen({ darkMode, onDarkModeChange, email, onSignOut }: {
+  darkMode: boolean; onDarkModeChange: (enabled: boolean) => void; email?: string; onSignOut: () => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.settingsContent}>
+      <Text style={styles.eyebrow}>PERSONALIZA TU DIARIO</Text>
+      <Text style={styles.bigTitle}>Ajustes</Text>
+      <Text style={styles.settingsIntro}>Adapta FlightLog a tu forma de viajar.</Text>
+
+      <View style={styles.settingsCard}>
+        <View style={styles.settingsRow}>
+          <View style={styles.settingsIcon}><Ionicons name={darkMode ? 'moon' : 'sunny-outline'} size={22} color={colors.primary} /></View>
+          <View style={styles.settingsText}>
+            <Text style={styles.settingsTitle}>Modo noche</Text>
+            <Text style={styles.settingsDescription}>Reduce el brillo y usa colores oscuros.</Text>
+          </View>
+          <Switch value={darkMode} onValueChange={onDarkModeChange} trackColor={{ false: colors.line, true: colors.primarySoft }} thumbColor={darkMode ? colors.primary : colors.muted} />
+        </View>
+      </View>
+
+      <View style={styles.settingsCard}>
+        <Text style={styles.settingsLabel}>CUENTA</Text>
+        {email ? <Text style={styles.accountEmail}>{email}</Text> : null}
+        <Pressable onPress={onSignOut} style={styles.signOutButton} accessibilityRole="button">
+          <Ionicons name="log-out-outline" size={20} color={colors.danger} />
+          <Text style={styles.signOutText}>Cerrar sesión</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.dataCredit}>Aeropuertos: OpenFlights y Airport Data. Mapas: Natural Earth. Las fotos de aeronaves conservan el crédito y enlace a su publicación original.</Text>
+    </ScrollView>
+  );
+}
 
 function actualIsoFromScheduled(
   scheduled: string,
@@ -293,27 +434,6 @@ function actualIsoFromScheduled(
   }
 
   return `${match[1]}T${actualTime}:00${match[3]}`;
-}
-
-function minutesBetweenIso(
-  start: string,
-  end: string,
-): string {
-  const a = Date.parse(start);
-  const b = Date.parse(end);
-
-  if (!Number.isFinite(a) || !Number.isFinite(b)) {
-    return '';
-  }
-
-  let minutes = Math.round((b - a) / 60000);
-
-  // llegada pasada medianoche
-  if (minutes < 0) {
-    minutes += 24 * 60;
-  }
-
-  return String(minutes);
 }
 
 function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
@@ -357,10 +477,68 @@ function EditScreen({ initial, onSave, onDelete, onBack, busy }: {
     draft.actualArrivalAt,
   ]);
 
+  useEffect(() => {
+    setDraft((current) => {
+      const calculated = calculatedArrival(
+        localDateKey(current.flightDate),
+        current.departureTime,
+        current.durationMinutes,
+        current.departureCode,
+        current.arrivalCode,
+      );
+      const arrivalTimeIsCalculated = current.fieldSources.arrivalTime === calculatedArrivalSource;
+      const arrivalDateIsCalculated = current.fieldSources.arrivalDate === calculatedArrivalSource;
+
+      if (!calculated) {
+        if (!arrivalTimeIsCalculated && !arrivalDateIsCalculated) return current;
+        const fieldSources = { ...current.fieldSources };
+        delete fieldSources.arrivalTime;
+        delete fieldSources.arrivalDate;
+        return {
+          ...current,
+          arrivalTime: arrivalTimeIsCalculated ? '' : current.arrivalTime,
+          arrivalDate: arrivalDateIsCalculated ? '' : current.arrivalDate,
+          fieldSources,
+        };
+      }
+
+      const canSetTime =
+        !current.arrivalTime ||
+        Boolean(current.fieldSources.arrivalTime) &&
+          current.fieldSources.arrivalTime !== actualScheduleSource;
+      const canSetDate =
+        !current.arrivalDate ||
+        Boolean(current.fieldSources.arrivalDate) &&
+          current.fieldSources.arrivalDate !== actualScheduleSource;
+      if (!canSetTime && !canSetDate) return current;
+      const fieldSources = { ...current.fieldSources };
+      if (canSetTime) fieldSources.arrivalTime = calculatedArrivalSource;
+      if (canSetDate) fieldSources.arrivalDate = calculatedArrivalSource;
+      const arrivalTime = canSetTime ? calculated.time : current.arrivalTime;
+      const arrivalDate = canSetDate ? calculated.date : current.arrivalDate;
+      if (arrivalTime === current.arrivalTime && arrivalDate === current.arrivalDate && fieldSources.arrivalTime === current.fieldSources.arrivalTime && fieldSources.arrivalDate === current.fieldSources.arrivalDate) return current;
+      return { ...current, arrivalTime, arrivalDate, fieldSources };
+    });
+  }, [draft.departureCode, draft.arrivalCode, draft.departureTime, draft.durationMinutes, draft.flightDate]);
+
 const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => setDraft((current) => {
     const fieldSources = { ...current.fieldSources };
     if (field === 'flightNumber') return { ...current, [field]: value, fieldSources: {} };
     delete fieldSources[field];
+    if (field === 'departureCode') {
+      const airport = getAirport(String(value));
+      if (airport && (!current.departureName || current.fieldSources.departureName)) {
+        fieldSources.departureName = 'Catálogo local';
+        return { ...current, [field]: value, departureName: airport.name, fieldSources };
+      }
+    }
+    if (field === 'arrivalCode') {
+      const airport = getAirport(String(value));
+      if (airport && (!current.arrivalName || current.fieldSources.arrivalName)) {
+        fieldSources.arrivalName = 'Catálogo local';
+        return { ...current, [field]: value, arrivalName: airport.name, fieldSources };
+      }
+    }
     return { ...current, [field]: value, fieldSources };
   });
 
@@ -442,6 +620,28 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
     ]);
   }
 
+  const departureAirport = getAirport(draft.departureCode);
+  const arrivalAirport = getAirport(draft.arrivalCode);
+  const actualDeparture = localDateTimeParts(
+    draft.actualDepartureAt,
+    departureAirport?.timeZone,
+  );
+  const actualArrival = localDateTimeParts(
+    draft.actualArrivalAt,
+    arrivalAirport?.timeZone,
+  );
+  const scheduledDeparture = localDateTimeParts(
+    draft.scheduledDepartureAt,
+    departureAirport?.timeZone,
+  );
+  const scheduledArrival = localDateTimeParts(
+    draft.scheduledArrivalAt,
+    arrivalAirport?.timeZone,
+  );
+  const actualScheduleApplied =
+    (!actualDeparture || draft.fieldSources.departureTime === actualScheduleSource) &&
+    (!actualArrival || draft.fieldSources.arrivalTime === actualScheduleSource);
+
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {allowPlaneFinderProbe &&
@@ -490,7 +690,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
       {allowFlighteraProbe &&
        draft.departureCode &&
        draft.flightNumber &&
-       draft.scheduledDepartureAt &&
        (
         <FlighteraProbe
           url={
@@ -519,17 +718,18 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                   data.actualArrivalTime,
                 );
 
-              const realDuration =
-                actualDepartureAt &&
-                actualArrivalAt
-                  ? minutesBetweenIso(
-                      actualDepartureAt,
-                      actualArrivalAt,
-                    )
-                  : current.durationMinutes;
-
               return {
                 ...current,
+
+                aircraftModel:
+                  current.aircraftModel ||
+                  data.aircraftModel ||
+                  '',
+
+                registration:
+                  current.registration ||
+                  data.registration ||
+                  '',
 
                 actualDepartureAt:
                   actualDepartureAt ||
@@ -538,9 +738,6 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                 actualArrivalAt:
                   actualArrivalAt ||
                   current.actualArrivalAt,
-
-                durationMinutes:
-                  realDuration,
 
                 fieldSources: {
                   ...current.fieldSources,
@@ -559,11 +756,19 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                       }
                     : {}),
 
-                  ...(actualDepartureAt &&
-                     actualArrivalAt
+                  ...(data.aircraftModel &&
+                     !current.aircraftModel
                     ? {
-                        durationMinutes:
-                          'Flightera:actual',
+                        aircraftModel:
+                          'Flightera',
+                      }
+                    : {}),
+
+                  ...(data.registration &&
+                     !current.registration
+                    ? {
+                        registration:
+                          'Flightera',
                       }
                     : {}),
                 },
@@ -583,7 +788,15 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
         <Text style={styles.editIntro}>Empieza con lo esencial. El resto puede esperar.</Text>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Tu vuelo</Text>
-          <InputField label="Número de vuelo" value={draft.flightNumber} onChangeText={(value) => set('flightNumber', value)} placeholder="Por ejemplo, IB3170" autoCapitalize="characters" maxLength={12} />
+          <InputField
+            label="Número de vuelo (opcional)"
+            value={draft.flightNumber}
+            onChangeText={(value) => set('flightNumber', value)}
+            placeholder="Por ejemplo, IB3170"
+            autoCapitalize="characters"
+            maxLength={12}
+            hint="Si no lo conoces, puedes guardar el viaje completando la ruta manualmente."
+          />
           <Text style={styles.fieldLabel}>Fecha de salida</Text>
           <Pressable onPress={() => setShowDatePicker(true)} style={styles.dateButton}><Ionicons name="calendar-outline" size={20} color={colors.primary} /><Text style={styles.dateText}>{dateLabel(localDateKey(draft.flightDate))}</Text></Pressable>
           {showDatePicker && (
@@ -607,12 +820,21 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
               }
             />
           )}
-          <ActionButton
-            label={lookupState === 'searching' ? 'Buscando vuelo…' : 'Buscar datos del vuelo'}
-            onPress={searchFlight}
-            disabled={lookupState === 'searching'}
-            icon="search-outline"
-          />
+          {draft.flightNumber.trim() ? (
+            <ActionButton
+              label={lookupState === 'searching' ? 'Buscando vuelo…' : 'Buscar datos del vuelo'}
+              onPress={searchFlight}
+              disabled={lookupState === 'searching'}
+              icon="search-outline"
+            />
+          ) : (
+            <ActionButton
+              label="Introducir los datos manualmente"
+              onPress={() => setDetails(true)}
+              secondary
+              icon="create-outline"
+            />
+          )}
           
           {lookupState === 'searching' && <View style={styles.lookupMessage}><ActivityIndicator size="small" color={colors.primary} /><Text style={styles.lookupText}>Buscando datos del vuelo…</Text></View>}
           {suggestions.length > 0 && <View style={styles.lookupBox}>
@@ -686,80 +908,41 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                   placeholder="HH:mm"
                   keyboardType="numeric"
                   maxLength={5}
+                  hint={draft.fieldSources.arrivalTime === calculatedArrivalSource ? 'Calculada con la salida y la duración. Si reconocemos ambos aeropuertos, ajustamos también sus zonas horarias.' : undefined}
                 />
               </View>
             </View>
 
-            {(draft.actualDepartureAt ||
-              draft.actualArrivalAt) && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <View
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#F5F8F7',
-                    borderRadius: 16,
-                    padding: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#687574',
-                      marginBottom: 5,
-                    }}
-                  >
-                    Salida real
-                  </Text>
-
-                  <Text
-                    style={{
-                      fontSize: 24,
-                      fontWeight: '700',
-                      color: '#233130',
-                    }}
-                  >
-                    {draft.actualDepartureAt
-                      ?.match(/T(\d{2}:\d{2})/)?.[1] ||
-                      '--:--'}
-                  </Text>
+            {(actualDeparture || actualArrival) && (
+              <View style={styles.realScheduleCard}>
+                <View style={styles.scheduleHeading}>
+                  <View style={styles.scheduleHeadingText}>
+                    <Text style={styles.scheduleTitle}>Horario real disponible</Text>
+                    <Text style={styles.scheduleDescription}>Compáralo con el previsto y decide si quieres usarlo en la ficha.</Text>
+                  </View>
+                  <Ionicons name="checkmark-circle-outline" size={25} color={colors.primary} />
                 </View>
-
-                <View
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#F5F8F7',
-                    borderRadius: 16,
-                    padding: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: '#687574',
-                      marginBottom: 5,
-                    }}
-                  >
-                    Llegada real
-                  </Text>
-
-                  <Text
-                    style={{
-                      fontSize: 24,
-                      fontWeight: '700',
-                      color: '#233130',
-                    }}
-                  >
-                    {draft.actualArrivalAt
-                      ?.match(/T(\d{2}:\d{2})/)?.[1] ||
-                      '--:--'}
-                  </Text>
+                <View style={styles.scheduleComparison}>
+                  <View style={styles.scheduleColumn}>
+                    <Text style={styles.scheduleColumnLabel}>Previsto</Text>
+                    <Text style={styles.scheduleTimes}>
+                      {scheduledDeparture?.time || draft.departureTime || '--:--'} → {scheduledArrival?.time || draft.arrivalTime || '--:--'}
+                    </Text>
+                  </View>
+                  <View style={styles.scheduleColumn}>
+                    <Text style={styles.scheduleColumnLabel}>Real</Text>
+                    <Text style={styles.scheduleTimes}>
+                      {actualDeparture?.time || '--:--'} → {actualArrival?.time || '--:--'}
+                    </Text>
+                  </View>
                 </View>
+                <ActionButton
+                  label={actualScheduleApplied ? 'Horario real aplicado' : 'Actualizar con el horario real'}
+                  onPress={() => setDraft((current) => applyActualScheduleToDraft(current))}
+                  disabled={actualScheduleApplied}
+                  secondary
+                  icon={actualScheduleApplied ? 'checkmark' : 'refresh'}
+                />
               </View>
             )}
 
@@ -799,7 +982,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                 style={{
                   marginTop: 16,
                   marginBottom: 4,
-                  backgroundColor: '#F5F8F7',
+                  backgroundColor: colors.input,
                   borderRadius: 16,
                   padding: 16,
                 }}
@@ -807,7 +990,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                 <Text
                   style={{
                     fontSize: 13,
-                    color: '#687574',
+                    color: colors.muted,
                     marginBottom: 5,
                   }}
                 >
@@ -818,7 +1001,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
                   style={{
                     fontSize: 24,
                     fontWeight: '700',
-                    color: '#233130',
+                    color: colors.ink,
                   }}
                 >
                   {draft.distanceKm} km
@@ -831,6 +1014,7 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
             <Text style={styles.sectionTitle}>A bordo</Text>
             <AircraftModelPicker
               value={draft.aircraftModel}
+              colors={colors}
               onChange={(value) =>
                 set('aircraftModel', value)
               }
@@ -851,21 +1035,128 @@ const set = <K extends keyof FlightDraft>(field: K, value: FlightDraft[K]) => se
 }
 
 export default function App() {
+  const { width: viewportWidth } = useWindowDimensions();
   const [session, setSession] = useState<Session | null>(null);
   const [booting, setBooting] = useState(true);
   const [page, setPage] = useState<Page>('list');
+  const [editReturnPage, setEditReturnPage] = useState<'list' | 'detail'>('list');
+  const [detailReturnPage, setDetailReturnPage] = useState<'list' | 'map'>('list');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
+  const [darkMode, setDarkMode] = useState(false);
   const [editing, setEditing] = useState<Flight | null>(null);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [updatingActual, setUpdatingActual] = useState(false);
+  const [settledTab, setSettledTab] = useState<TabPage>('list');
+  const pagerOffset = useRef(new Animated.Value(0)).current;
+  const currentPage = useRef<Page>(page);
+  const swipeStartIndex = useRef(0);
+  const viewportWidthRef = useRef(viewportWidth);
+  const mapGestureActive = useRef(false);
+  currentPage.current = page;
+  viewportWidthRef.current = viewportWidth;
+  const handleMapGestureActive = useCallback((active: boolean) => { mapGestureActive.current = active; }, []);
+
+  const tabSwipeResponder = useMemo(() => {
+    const animateToIndex = (index: number, onComplete?: () => void) => Animated.timing(pagerOffset, {
+      toValue: -index * viewportWidthRef.current,
+      duration: 240,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.cubic),
+    }).start(({ finished }) => {
+      if (finished) onComplete?.();
+    });
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_event, gesture) => {
+        const isTab = isTabPage(currentPage.current);
+        return isTab && !mapGestureActive.current && Math.abs(gesture.dx) > 14 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35;
+      },
+      onPanResponderGrant: () => {
+        swipeStartIndex.current = isTabPage(currentPage.current) ? tabPages.indexOf(currentPage.current) : 0;
+        pagerOffset.stopAnimation();
+      },
+      onPanResponderMove: (_event, gesture) => {
+        const width = viewportWidthRef.current;
+        const atStart = swipeStartIndex.current === 0 && gesture.dx > 0;
+        const atEnd = swipeStartIndex.current === tabPages.length - 1 && gesture.dx < 0;
+        const drag = gesture.dx * (atStart || atEnd ? 0.22 : 1);
+        pagerOffset.setValue(-swipeStartIndex.current * width + drag);
+      },
+      onPanResponderRelease: (_event, gesture) => {
+        const direction = gesture.dx < 0 ? 1 : -1;
+        const destination = swipeStartIndex.current + direction;
+        const shouldChange = destination >= 0 && destination < tabPages.length && (Math.abs(gesture.dx) > 72 || Math.abs(gesture.vx) > 0.55);
+        if (!shouldChange) {
+          animateToIndex(swipeStartIndex.current);
+          return;
+        }
+        const destinationPage = tabPages[destination];
+        setPage(destinationPage);
+        animateToIndex(destination, () => setSettledTab(destinationPage));
+      },
+      onPanResponderTerminate: () => animateToIndex(swipeStartIndex.current),
+      onPanResponderTerminationRequest: () => true,
+    });
+  }, [pagerOffset]);
+
+  const navigateTab = useCallback((destinationPage: Page) => {
+    if (!isTabPage(destinationPage)) {
+      setPage(destinationPage);
+      return;
+    }
+    const destination = tabPages.indexOf(destinationPage);
+    pagerOffset.stopAnimation();
+    if (currentPage.current === destinationPage) {
+      pagerOffset.setValue(-destination * viewportWidthRef.current);
+      setSettledTab(destinationPage);
+      return;
+    }
+    setPage(destinationPage);
+    Animated.timing(pagerOffset, {
+      toValue: -destination * viewportWidthRef.current,
+      duration: 240,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.cubic),
+    }).start(({ finished }) => {
+      if (finished) setSettledTab(destinationPage);
+    });
+  }, [pagerOffset]);
+
+  useEffect(() => {
+    const activePage = currentPage.current;
+    if (isTabPage(activePage)) pagerOffset.setValue(-tabPages.indexOf(activePage) * viewportWidth);
+  }, [pagerOffset, viewportWidth]);
+
+  colors = darkMode ? darkColors : lightColors;
+  styles = createStyles(colors);
+
+  useEffect(() => {
+    Promise.all([
+      Storage.getItem('flightlog.darkMode'),
+      Storage.getItem('flightlog.sortOrder'),
+    ]).then(([savedDarkMode, savedSortOrder]) => {
+      setDarkMode(savedDarkMode === 'true');
+      if (savedSortOrder === 'oldest' || savedSortOrder === 'newest') setSortOrder(savedSortOrder);
+    }).catch(() => undefined);
+  }, []);
+
 
   useEffect(() => {
     if (!supabase) { setBooting(false); return; }
     const client = supabase;
     client.auth.getSession().then(({ data }) => { setSession(data.session); setBooting(false); }).catch(() => setBooting(false));
-    const { data: listener } = client.auth.onAuthStateChange((_event, nextSession) => { setSession(nextSession); if (!nextSession) { setFlights([]); setPage('list'); } });
+    const { data: listener } = client.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (!nextSession) {
+        setFlights([]);
+        pagerOffset.setValue(0);
+        setSettledTab('list');
+        setPage('list');
+      }
+    });
     return () => listener.subscription.unsubscribe();
-  }, []);
+  }, [pagerOffset]);
 
   const loadFlights = useCallback(async () => {
     if (!supabase || !session) return;
@@ -881,11 +1172,54 @@ export default function App() {
 
   useEffect(() => { if (session) void loadFlights(); }, [session, loadFlights]);
 
-  function openNew() { setEditing(null); setPage('edit'); }
-  function openEdit(flight: Flight) { setEditing(flight); setPage('edit'); }
-  function back() { setPage('list'); setEditing(null); }
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (page !== 'list') {
+        back();
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [page]);
 
-  async function save(draft: FlightDraft) {
+  function openNew() { setEditing(null); setEditReturnPage('list'); setPage('edit'); }
+  function openDetail(flight: Flight, returnPage: 'list' | 'map' = 'list') { setEditing(flight); setDetailReturnPage(returnPage); setPage('detail'); }
+  function openEdit(flight: Flight) { setEditing(flight); setEditReturnPage('detail'); setPage('edit'); }
+  function openFlightFromDetail(flight: Flight) { setEditing(flight); setPage('detail'); }
+  function closeToList() {
+    pagerOffset.setValue(0);
+    setSettledTab('list');
+    setPage('list');
+    setEditing(null);
+    setEditReturnPage('list');
+  }
+  function back() {
+    if (page === 'edit' && editReturnPage === 'detail' && editing) {
+      setPage('detail');
+      return;
+    }
+    if (page === 'detail') {
+      setPage(detailReturnPage);
+      setEditing(null);
+      setEditReturnPage('list');
+      return;
+    }
+    closeToList();
+  }
+  function toggleSort() {
+    setSortOrder((current) => {
+      const next = current === 'newest' ? 'oldest' : 'newest';
+      void Storage.setItem('flightlog.sortOrder', next);
+      return next;
+    });
+  }
+  function changeDarkMode(enabled: boolean) {
+    setDarkMode(enabled);
+    void Storage.setItem('flightlog.darkMode', String(enabled));
+  }
+
+  async function persistFlight(draft: FlightDraft) {
     if (!supabase || !session) return;
     setSaving(true);
     try {
@@ -894,11 +1228,67 @@ export default function App() {
         ? await supabase.from('flights').update(row).eq('id', editing.id).eq('user_id', session.user.id).select('id').single()
         : await supabase.from('flights').insert(row).select('id').single();
       if (result.error) throw result.error;
-      back();
+      closeToList();
       await loadFlights();
     } catch (error) {
       Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Revisa tu conexión e inténtalo de nuevo.');
     } finally { setSaving(false); }
+  }
+
+  async function applyActualTimes(flight: Flight) {
+    if (!supabase || !session) return;
+    const draft = applyActualScheduleToDraft(flightToDraft(flight));
+    setUpdatingActual(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('flights')
+        .update(draftToRow(draft, session.user.id))
+        .eq('id', flight.id)
+        .eq('user_id', session.user.id)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      const updatedFlight = data as Flight;
+      setEditing(updatedFlight);
+      setFlights((current) => current.map((item) => item.id === updatedFlight.id ? updatedFlight : item));
+    } catch (error) {
+      Alert.alert(
+        'No se pudo actualizar el horario',
+        error instanceof Error ? error.message : 'Revisa tu conexión e inténtalo de nuevo.',
+      );
+    } finally {
+      setUpdatingActual(false);
+    }
+  }
+
+  function save(draft: FlightDraft) {
+    const number = normalizedFlightNumber(draft.flightNumber);
+    const date = localDateKey(draft.flightDate);
+    const departureCode = draft.departureCode.trim().toUpperCase();
+    const arrivalCode = draft.arrivalCode.trim().toUpperCase();
+    const duplicate = flights.find((flight) => {
+      if (flight.id === editing?.id || flight.flight_date !== date) return false;
+      if (number) {
+        return normalizedFlightNumber(flight.flight_number ?? '') === number;
+      }
+      return Boolean(
+        departureCode &&
+        arrivalCode &&
+        flight.departure_airport_code === departureCode &&
+        flight.arrival_airport_code === arrivalCode,
+      );
+    });
+    if (duplicate) {
+      const identifier = number || `${departureCode} → ${arrivalCode}`;
+      Alert.alert('Este vuelo ya está guardado', `${identifier} del ${shortDateLabel(date)} ya aparece en tu diario.`, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Guardar igualmente', onPress: () => void persistFlight(draft) },
+      ]);
+      return;
+    }
+    void persistFlight(draft);
   }
 
   async function removeFlightFromList(
@@ -936,7 +1326,7 @@ export default function App() {
     try {
       const { error } = await supabase.from('flights').delete().eq('id', editing.id).eq('user_id', session.user.id);
       if (error) throw error;
-      back();
+      closeToList();
       await loadFlights();
     } catch (error) {
       Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Revisa tu conexión e inténtalo de nuevo.');
@@ -946,19 +1336,52 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <StatusBar style="dark" />
+        <StatusBar style={darkMode ? 'light' : 'dark'} />
         {!isConfigured ? <SetupScreen /> : booting ? <ActivityIndicator style={styles.centered} color={colors.primary} /> : !session ? <AuthScreen /> : page === 'edit' ? (
           <EditScreen key={editing?.id ?? 'new'} initial={editing} onSave={save} onDelete={remove} onBack={back} busy={saving} />
+        ) : page === 'detail' && editing ? (
+          <FlightDetailScreen
+            flight={editing}
+            flights={flights}
+            colors={colors}
+            onBack={back}
+            onEdit={() => openEdit(editing)}
+            onOpenFlight={openFlightFromDetail}
+            onApplyActualTimes={() => void applyActualTimes(editing)}
+            updatingActual={updatingActual}
+          />
         ) : (
-          <ListScreen flights={flights} loading={loading} onRefresh={() => void loadFlights()} onAdd={openNew} onEdit={openEdit} onDelete={removeFlightFromList} onSignOut={() => void supabase?.auth.signOut()} />
+          <View style={styles.flex}>
+            <View style={styles.pagerViewport} {...tabSwipeResponder.panHandlers}>
+              <Animated.View style={[styles.pagerTrack, { width: viewportWidth * tabPages.length, transform: [{ translateX: pagerOffset }] }]}>
+                <View style={[styles.pagerPage, { width: viewportWidth }]}>
+                  <ListScreen flights={flights} loading={loading} sortOrder={sortOrder} onToggleSort={toggleSort} onRefresh={() => void loadFlights()} onOpenDetail={openDetail} onDelete={removeFlightFromList} />
+                </View>
+                <View style={[styles.pagerPage, { width: viewportWidth }]}>
+                  <GlobalMapScreen flights={flights} colors={colors} onOpenFlight={(flight) => openDetail(flight, 'map')} onMapGestureActive={handleMapGestureActive} />
+                </View>
+                <View style={[styles.pagerPage, { width: viewportWidth }]}>
+                  <AircraftScreen flights={flights} colors={colors} active={settledTab === 'aircraft'} />
+                </View>
+                <View style={[styles.pagerPage, { width: viewportWidth }]}>
+                  <SettingsScreen darkMode={darkMode} onDarkModeChange={changeDarkMode} email={session.user.email} onSignOut={() => void supabase?.auth.signOut()} />
+                </View>
+              </Animated.View>
+            </View>
+            <BottomNavigation page={page} onChange={navigateTab} onAdd={openNew} />
+          </View>
         )}
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   flex: { flex: 1 }, safeArea: { flex: 1, backgroundColor: colors.background },
+  pagerViewport: { flex: 1, overflow: 'hidden' },
+  pagerTrack: { flex: 1, flexDirection: 'row' },
+  pagerPage: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', padding: 28 },
   logo: { width: 64, height: 64, borderRadius: 22, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
   bigTitle: { fontSize: 33, fontWeight: '800', letterSpacing: -0.8, color: colors.ink },
@@ -968,49 +1391,62 @@ const styles = StyleSheet.create({
   authCard: { marginTop: 30 },
   sectionTitle: { color: colors.ink, fontSize: 19, fontWeight: '700', marginBottom: 18 },
   field: { marginBottom: 16 }, fieldLabel: { color: colors.ink, fontSize: 14, fontWeight: '600', marginBottom: 8 },
-  input: { minHeight: 52, backgroundColor: '#F7FAF9', borderColor: colors.line, borderWidth: 1, borderRadius: 15, paddingHorizontal: 15, color: colors.ink, fontSize: 16 },
+  inputContainer: { position: 'relative' },
+  input: { width: '100%', minHeight: 52, backgroundColor: colors.input, borderColor: colors.line, borderWidth: 1, borderRadius: 15, paddingHorizontal: 15, color: colors.ink, fontSize: 16 },
+  inputWithAccessory: { paddingRight: 52 },
+  inputAccessory: { position: 'absolute', right: 15, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
   inputMultiline: { minHeight: 92, paddingTop: 14, textAlignVertical: 'top' },
   fieldHint: { color: colors.muted, fontSize: 12, marginTop: 6 },
   button: { minHeight: 54, backgroundColor: colors.primary, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, paddingHorizontal: 18 },
   buttonSecondary: { backgroundColor: colors.primarySoft }, buttonDimmed: { opacity: 0.65 },
-  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' }, buttonTextSecondary: { color: colors.primary },
+  buttonText: { color: colors.onPrimary, fontSize: 16, fontWeight: '700' }, buttonTextSecondary: { color: colors.primary },
   switchAuth: { alignItems: 'center', padding: 18 }, linkText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
   noticeCard: { backgroundColor: colors.surface, borderRadius: 22, padding: 20, marginTop: 30 }, noticeTitle: { color: colors.ink, fontSize: 18, fontWeight: '700', marginBottom: 8 },
   body: { color: colors.muted, fontSize: 15, lineHeight: 22 }, bodyCentered: { color: colors.muted, fontSize: 15, lineHeight: 22, textAlign: 'center' },
-  listContent: { padding: 20, paddingBottom: 45 }, headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 21 },
+  listContent: { padding: 20, paddingBottom: 115 }, headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 21 },
   eyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1.6, color: colors.primary, marginBottom: 5 },
   iconButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  heroCard: { backgroundColor: colors.sky, borderRadius: 26, padding: 22, marginBottom: 14 },
-  heroCircle: { width: 49, height: 49, borderRadius: 17, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  heroTitle: { fontSize: 23, fontWeight: '800', color: colors.ink, marginBottom: 8 },
-  heroText: { fontSize: 15, lineHeight: 22, color: colors.muted, marginBottom: 21 },
-  statsRow: { flexDirection: 'row', gap: 9, marginBottom: 27 },
-  statCard: { flex: 1, backgroundColor: colors.surface, borderRadius: 19, paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: colors.line },
-  statValue: { fontSize: 21, fontWeight: '800', color: colors.ink }, statLabel: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  journeySummary: { backgroundColor: colors.surface, borderRadius: 23, borderWidth: 1, borderColor: colors.line, padding: 17, marginBottom: 14 },
+  journeySummaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 15 }, journeySummaryTitle: { color: colors.ink, fontSize: 17, fontWeight: '700' }, journeySummaryMeta: { color: colors.muted, fontSize: 10 },
+  journeySummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 14 }, journeyMetric: { width: '50%' }, journeyMetricValue: { color: colors.ink, fontSize: 19, fontWeight: '800' }, journeyMetricLabel: { color: colors.muted, fontSize: 10, marginTop: 2 },
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 2 },
+  listActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sortButton: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, borderRadius: 12, backgroundColor: colors.primarySoft },
+  sortText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  refreshButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   flightCard: { backgroundColor: colors.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.line, padding: 18, marginBottom: 12 },
   flightTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  flightNumberPill: { backgroundColor: colors.primarySoft, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 6 },
-  flightNumberText: { color: colors.primary, fontSize: 13, fontWeight: '800' }, flightDate: { color: colors.muted, fontSize: 13 },
+  flightIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  flightNumberPill: { borderRadius: 9, paddingHorizontal: 10, paddingVertical: 6 },
+  flightNumberText: { fontSize: 13, fontWeight: '800' },
+  aircraftIcon: { width: 36, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  flightDate: { color: colors.muted, fontSize: 13 },
   routeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 23, marginBottom: 19 },
   routeCode: { color: colors.ink, fontSize: 23, fontWeight: '800', minWidth: 76 },
   routeLine: { flex: 1, flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, gap: 4 },
-  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary }, line: { flex: 1, height: 1, backgroundColor: '#B6D5D4' },
+  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary }, line: { flex: 1, height: 1, backgroundColor: colors.routeLine },
   flightBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  flightMeta: { flex: 1, color: colors.muted, fontSize: 13 },
-  statusPill: { backgroundColor: colors.primarySoft, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
-  statusPlanned: { backgroundColor: colors.amber }, statusText: { color: colors.ink, fontSize: 11, fontWeight: '600' },
+  flightDetails: { flex: 1 }, flightMeta: { color: colors.muted, fontSize: 13 },
+  aircraftMeta: { fontSize: 11, fontWeight: '600', marginTop: 3 },
+  statusPill: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  statusFlown: { backgroundColor: colors.completedBackground }, statusPlanned: { backgroundColor: colors.plannedBackground },
+  statusText: { fontSize: 11, fontWeight: '700' }, statusTextFlown: { color: colors.completedText }, statusTextPlanned: { color: colors.plannedText },
   emptyCard: { alignItems: 'center', backgroundColor: colors.surface, borderRadius: 24, padding: 30, gap: 10 },
   emptyTitle: { color: colors.ink, fontSize: 18, fontWeight: '700' }, footnote: { color: colors.muted, fontSize: 11, marginTop: 8 }, loader: { marginVertical: 30 },
   editContent: { padding: 20, paddingBottom: 50 }, headerTitle: { color: colors.ink, fontSize: 19, fontWeight: '700' },
   editIntro: { color: colors.muted, fontSize: 15, marginBottom: 21 },
-  dateButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, borderRadius: 15, backgroundColor: '#F7FAF9', borderWidth: 1, borderColor: colors.line, marginBottom: 18 },
+  dateButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, borderRadius: 15, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.line, marginBottom: 18 },
   dateText: { color: colors.ink, fontSize: 16 },
-  segmentRow: { flexDirection: 'row', backgroundColor: '#F7FAF9', padding: 4, borderRadius: 15 },
+  segmentRow: { flexDirection: 'row', backgroundColor: colors.input, padding: 4, borderRadius: 15 },
   segment: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
-  segmentActive: { backgroundColor: colors.primary }, segmentText: { color: colors.muted, fontWeight: '600' }, segmentTextActive: { color: '#FFFFFF' },
+  segmentActive: { backgroundColor: colors.primary }, segmentText: { color: colors.muted, fontWeight: '600' }, segmentTextActive: { color: colors.onPrimary },
   expandButton: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, padding: 15, marginBottom: 5 },
   expandText: { color: colors.primary, fontSize: 15, fontWeight: '700' }, twoCols: { flexDirection: 'row', gap: 12 }, col: { flex: 1 },
+  realScheduleCard: { backgroundColor: colors.primarySoft, borderRadius: 19, padding: 15, marginBottom: 18 },
+  scheduleHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 13 }, scheduleHeadingText: { flex: 1 },
+  scheduleTitle: { color: colors.ink, fontSize: 15, fontWeight: '700' }, scheduleDescription: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  scheduleComparison: { flexDirection: 'row', gap: 9, marginBottom: 12 }, scheduleColumn: { flex: 1, backgroundColor: colors.surface, borderRadius: 13, padding: 12 },
+  scheduleColumnLabel: { color: colors.muted, fontSize: 10, fontWeight: '700' }, scheduleTimes: { color: colors.ink, fontSize: 15, fontWeight: '800', marginTop: 4 },
   deleteButton: { alignItems: 'center', padding: 20 }, deleteText: { color: colors.danger, fontSize: 15, fontWeight: '600' },
   lookupMessage: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 16 },
   lookupBox: { borderRadius: 18, backgroundColor: colors.primarySoft, padding: 15, marginBottom: 18 },
@@ -1020,5 +1456,18 @@ const styles = StyleSheet.create({
   lookupRoute: { color: colors.ink, fontSize: 17, fontWeight: '800' },
   lookupText: { color: colors.muted, fontSize: 13, lineHeight: 19, marginBottom: 7 },
   lookupHint: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 5 },
-});
-
+  bottomNavigation: { position: 'absolute', left: 14, right: 14, bottom: 10, minHeight: 72, flexDirection: 'row', alignItems: 'stretch', backgroundColor: colors.tabBar, borderRadius: 24, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 6, paddingVertical: 7, shadowColor: '#000000', shadowOpacity: 0.1, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 6 },
+  bottomNavigationItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 16 },
+  bottomNavigationLabel: { color: colors.muted, fontSize: 10, fontWeight: '600' }, bottomNavigationLabelActive: { color: colors.primary },
+  addNavigationItem: { flex: 1.12, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 1 }, addNavigationPressed: { opacity: .72, transform: [{ scale: .96 }] },
+  addNavigationButton: { position: 'absolute', top: -24, width: 60, height: 60, borderRadius: 30, backgroundColor: colors.primary, borderWidth: 5, borderColor: colors.tabBar, alignItems: 'center', justifyContent: 'center', shadowColor: '#000000', shadowOpacity: .2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 9 },
+  addNavigationLabel: { color: colors.primary, fontSize: 10, fontWeight: '800' },
+  settingsContent: { padding: 20, paddingBottom: 120 }, settingsIntro: { color: colors.muted, fontSize: 15, lineHeight: 22, marginTop: 8, marginBottom: 25 },
+  settingsCard: { backgroundColor: colors.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.line, padding: 18, marginBottom: 14 },
+  settingsRow: { flexDirection: 'row', alignItems: 'center', gap: 13 }, settingsIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  settingsText: { flex: 1 }, settingsTitle: { color: colors.ink, fontSize: 16, fontWeight: '700' }, settingsDescription: { color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  settingsLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.3 }, accountEmail: { color: colors.ink, fontSize: 15, marginTop: 12, marginBottom: 16 },
+  signOutButton: { minHeight: 48, borderRadius: 15, backgroundColor: colors.input, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, signOutText: { color: colors.danger, fontSize: 15, fontWeight: '700' },
+  dataCredit: { color: colors.muted, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 8, paddingHorizontal: 20 },
+  });
+}

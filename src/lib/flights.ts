@@ -1,9 +1,11 @@
+import { getAirport, localDateTimeParts } from './airports';
+
 export type FlightStatus = 'flown' | 'planned';
 
 export type Flight = {
   id: string;
   user_id: string;
-  flight_number: string;
+  flight_number: string | null;
   flight_date: string;
   status: FlightStatus;
   airline_name: string | null;
@@ -20,6 +22,8 @@ export type Flight = {
   actual_departure_at: string | null;
   scheduled_arrival_at: string | null;
   actual_arrival_at: string | null;
+  departure_time_zone: string | null;
+  arrival_time_zone: string | null;
   aircraft_model: string | null;
   aircraft_registration: string | null;
   seat: string | null;
@@ -27,6 +31,7 @@ export type Flight = {
   notes: string | null;
   field_sources: Record<string, string>;
   created_at: string;
+  updated_at: string;
 };
 
 export type FlightDraft = {
@@ -55,6 +60,8 @@ export type FlightDraft = {
   fieldSources: Record<string, string>;
 };
 
+export const actualScheduleSource = 'Horario real';
+
 export const todayLocal = () => new Date();
 
 export function localDateKey(date: Date): string {
@@ -81,6 +88,10 @@ export function shortDateLabel(key: string): string {
   }).format(parseDateKey(key));
 }
 
+export function flightNumberLabel(value?: string | null): string {
+  return value?.trim() || 'Sin número';
+}
+
 export function formatDuration(minutes: number | null): string | null {
   if (minutes == null) return null;
   const hours = Math.floor(minutes / 60);
@@ -104,7 +115,7 @@ export function blankDraft(): FlightDraft {
 
 export function flightToDraft(flight: Flight): FlightDraft {
   return {
-    flightNumber: flight.flight_number,
+    flightNumber: flight.flight_number ?? '',
     flightDate: parseDateKey(flight.flight_date),
     status: flight.status,
     airlineName: flight.airline_name ?? '',
@@ -136,7 +147,7 @@ const timeIsValid = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
 export function validateDraft(draft: FlightDraft): string | null {
   const number = draft.flightNumber.replace(/\s+/g, '').toUpperCase();
-  if (!/^[A-Z0-9]{2,12}$/.test(number)) {
+  if (number && !/^[A-Z0-9]{2,12}$/.test(number)) {
     return 'Escribe un número de vuelo válido, por ejemplo IB3170.';
   }
   if (draft.departureCode && !/^[A-Z]{3,4}$/.test(draft.departureCode.trim().toUpperCase())) {
@@ -166,22 +177,72 @@ export function validateDraft(draft: FlightDraft): string | null {
   return null;
 }
 
+export function applyActualScheduleToDraft(
+  draft: FlightDraft,
+): FlightDraft {
+  const departureAirport = getAirport(draft.departureCode);
+  const arrivalAirport = getAirport(draft.arrivalCode);
+  const actualDeparture = localDateTimeParts(
+    draft.actualDepartureAt,
+    departureAirport?.timeZone,
+  );
+  const actualArrival = localDateTimeParts(
+    draft.actualArrivalAt,
+    arrivalAirport?.timeZone,
+  );
+
+  if (!actualDeparture && !actualArrival) return draft;
+
+  const fieldSources = { ...draft.fieldSources };
+  let durationMinutes = draft.durationMinutes;
+
+  if (actualDeparture) fieldSources.departureTime = actualScheduleSource;
+  if (actualArrival) {
+    fieldSources.arrivalTime = actualScheduleSource;
+    fieldSources.arrivalDate = actualScheduleSource;
+  }
+
+  if (draft.actualDepartureAt && draft.actualArrivalAt) {
+    const departureMs = Date.parse(draft.actualDepartureAt);
+    const arrivalMs = Date.parse(draft.actualArrivalAt);
+    const duration = Math.round((arrivalMs - departureMs) / 60_000);
+
+    if (Number.isFinite(duration) && duration >= 0) {
+      durationMinutes = String(duration);
+      fieldSources.durationMinutes = actualScheduleSource;
+    }
+  }
+
+  return {
+    ...draft,
+    departureTime: actualDeparture?.time ?? draft.departureTime,
+    arrivalTime: actualArrival?.time ?? draft.arrivalTime,
+    arrivalDate: actualArrival?.date ?? draft.arrivalDate,
+    durationMinutes,
+    fieldSources,
+  };
+}
+
 export function draftToRow(draft: FlightDraft, userId: string) {
+  const departureAirport = getAirport(draft.departureCode);
+  const arrivalAirport = getAirport(draft.arrivalCode);
   return {
     user_id: userId,
-    flight_number: draft.flightNumber.replace(/\s+/g, '').toUpperCase(),
+    flight_number: optionalUpper(draft.flightNumber),
     flight_date: localDateKey(draft.flightDate),
     status: draft.status,
     airline_name: optional(draft.airlineName),
     departure_airport_code: optionalUpper(draft.departureCode),
-    departure_airport_name: optional(draft.departureName),
+    departure_airport_name: optional(draft.departureName) ?? departureAirport?.name ?? null,
     arrival_airport_code: optionalUpper(draft.arrivalCode),
-    arrival_airport_name: optional(draft.arrivalName),
+    arrival_airport_name: optional(draft.arrivalName) ?? arrivalAirport?.name ?? null,
     departure_time_local: optional(draft.departureTime),
     arrival_date: optional(draft.arrivalDate),
     arrival_time_local: optional(draft.arrivalTime),
     duration_minutes: draft.durationMinutes ? Number(draft.durationMinutes) : null,
     distance_km: draft.distanceKm ? Number(draft.distanceKm) : null,
+    departure_time_zone: departureAirport?.timeZone || null,
+    arrival_time_zone: arrivalAirport?.timeZone || null,
     scheduled_departure_at: optional(draft.scheduledDepartureAt),
     actual_departure_at: optional(draft.actualDepartureAt),
     scheduled_arrival_at: optional(draft.scheduledArrivalAt),

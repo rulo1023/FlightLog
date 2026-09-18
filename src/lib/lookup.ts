@@ -1,120 +1,10 @@
-
-async function debugFlighteraPageData(
-  html: string,
-  detailUrl: string,
-) {
-  const endpointMatch = html.match(
-    /data-endpoint=["']([^"']+)["']/i,
-  );
-
-  const tokenMatch = html.match(
-    /data-auth-token=["']([^"']+)["']/i,
-  );
-
-  if (!endpointMatch?.[1]) {
-    console.log(
-      'FLIGHTERA PAGE DATA: no endpoint',
-    );
-    return;
-  }
-
-  if (!tokenMatch?.[1]) {
-    console.log(
-      'FLIGHTERA PAGE DATA: no auth token',
-    );
-    return;
-  }
-
-  const endpoint =
-    endpointMatch[1].startsWith('http')
-      ? endpointMatch[1]
-      : `https://www.flightera.net${endpointMatch[1]}`;
-
-  console.log(
-    'FLIGHTERA PAGE DATA ENDPOINT:',
-    endpoint,
-  );
-
-  try {
-    const response = await fetch(endpoint, {
-      method: 'GET',
-
-      headers: {
-        Accept: 'application/json,text/html,*/*',
-
-        Authorization:
-          tokenMatch[1],
-
-        Referer:
-          detailUrl,
-
-        'Accept-Language':
-          'en-US,en;q=0.9',
-      },
-    });
-
-    console.log(
-      'FLIGHTERA PAGE DATA STATUS:',
-      response.status,
-    );
-
-    const body =
-      await response.text();
-
-    console.log(
-      'FLIGHTERA PAGE DATA LENGTH:',
-      body.length,
-    );
-
-    console.log(
-      'FLIGHTERA PAGE DATA PREVIEW:',
-      body.slice(0, 1500),
-    );
-
-    const terms = [
-      'registration',
-      'aircraft',
-      'aircraft_type',
-      'aircraftType',
-      'model',
-      'Airbus',
-      'Boeing',
-      'Embraer',
-      'EC-',
-    ];
-
-    for (const term of terms) {
-      const index =
-        body
-          .toLowerCase()
-          .indexOf(
-            term.toLowerCase(),
-          );
-
-      if (index >= 0) {
-        console.log(
-          `FLIGHTERA PAGE DATA ${term}:`,
-          body.slice(
-            Math.max(0, index - 300),
-            Math.min(
-              body.length,
-              index + 700,
-            ),
-          ),
-        );
-      }
-    }
-  } catch (error) {
-    console.error(
-      'FLIGHTERA PAGE DATA ERROR:',
-      error,
-    );
-  }
-}
 import { FlightDraft, localDateKey } from './flights';
+import { supabase } from './supabase';
+import { getAirport, routeDistanceKm } from './airports';
 
 export type LookupSuggestion = {
   kind: 'dated' | 'route';
+  source?: 'flightera' | 'airlabs';
 
   flightNumber: string;
   flightDate: string;
@@ -173,6 +63,14 @@ type FlighteraFlight = {
     icaoCode?: string;
     name?: string;
   };
+
+  aircraft?:
+    | string
+    | {
+        name?: string;
+        model?: string;
+        identifier?: string;
+      };
 };
 
 const FLIGHTERA_BASE = 'https://www.flightera.net';
@@ -430,7 +328,20 @@ function parseDistanceKm(
  */
 function extractRegistration(
   html: string,
+  flight?: FlighteraFlight,
 ): string | undefined {
+  const aircraftIdentifier =
+    typeof flight?.aircraft === 'object'
+      ? flight.aircraft.identifier
+      : undefined;
+
+  if (
+    aircraftIdentifier &&
+    /^[A-Z0-9]{1,3}-[A-Z0-9]{3,6}$/i.test(aircraftIdentifier.trim())
+  ) {
+    return aircraftIdentifier.trim().toUpperCase();
+  }
+
   const jsonPatterns = [
     /"aircraftRegistration"\s*:\s*"([^"]+)"/i,
     /"registration"\s*:\s*"([^"]+)"/i,
@@ -477,6 +388,56 @@ function extractRegistration(
   }
 
   return undefined;
+}
+
+function extractAircraftModel(
+  html: string,
+  flight?: FlighteraFlight,
+): string | undefined {
+  if (typeof flight?.aircraft === 'string' && flight.aircraft.trim()) {
+    return flight.aircraft.trim();
+  }
+
+  if (typeof flight?.aircraft === 'object') {
+    const schemaValue =
+      flight.aircraft.model?.trim() ||
+      flight.aircraft.name?.trim();
+
+    if (schemaValue) {
+      return schemaValue;
+    }
+  }
+
+  const normalizedHtml = html
+    .replace(/&quot;/gi, '"')
+    .replace(/\\u002D/gi, '-');
+
+  const jsonPatterns = [
+    /"aircraftModel"\s*:\s*"([^"<>]{2,60})"/i,
+    /"aircraft_model"\s*:\s*"([^"<>]{2,60})"/i,
+    /"aircraftType"\s*:\s*"([^"<>]{2,60})"/i,
+    /"aircraft_type"\s*:\s*"([^"<>]{2,60})"/i,
+  ];
+
+  for (const pattern of jsonPatterns) {
+    const match = normalizedHtml.match(pattern);
+
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  const visibleText = normalizedHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  const commonModel = visibleText.match(
+    /\b(Airbus\s+A\d{3}(?:-\d{2,3})?(?:neo)?|Boeing\s+7\d{2}(?:-\d{2,3})?(?:\s+MAX\s*\d+)?|Embraer\s+(?:E\s*)?\d{3}(?:-E2)?|ATR\s+(?:42|72)(?:-\d{3})?|Bombardier\s+(?:CRJ|Dash)\s*[A-Z0-9-]+)\b/i,
+  );
+
+  return commonModel?.[1]?.replace(/\s+/g, ' ').trim();
 }
 
 function findDetailUrlForDate(
@@ -561,6 +522,7 @@ function makeSuggestion(
 
   const suggestion: LookupSuggestion = {
     kind: 'dated',
+    source: 'flightera',
 
     flightNumber,
     flightDate,
@@ -624,7 +586,10 @@ function makeSuggestion(
       ),
 
     registration:
-      extractRegistration(html),
+      extractRegistration(html, flight),
+
+    aircraftModel:
+      extractAircraftModel(html, flight),
 
     scheduledDepartureAt:
       flight.departureTime || undefined,
@@ -663,7 +628,7 @@ export async function lookupFlight(
   }
 
   const result =
-    requestFlighteraLookup(
+    requestFlightLookup(
       number,
       day,
     );
@@ -686,6 +651,127 @@ export async function lookupFlight(
 
     throw error;
   }
+}
+
+function optionalString(
+  value: unknown,
+): string | undefined {
+  return typeof value === 'string' && value.trim()
+    ? value.trim()
+    : undefined;
+}
+
+function optionalNumber(
+  value: unknown,
+): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function parseServerSuggestion(
+  value: unknown,
+  flightNumber: string,
+  flightDate: string,
+): LookupSuggestion | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const item = value as Record<string, unknown>;
+  const departureCode = optionalString(item.departureCode)?.toUpperCase();
+  const arrivalCode = optionalString(item.arrivalCode)?.toUpperCase();
+  const resolvedNumber = normalizedFlightNumber(optionalString(item.flightNumber) ?? '');
+  const resolvedDate = optionalString(item.flightDate);
+  const kind = item.kind === 'dated' ? 'dated' : item.kind === 'route' ? 'route' : null;
+
+  if (
+    !kind ||
+    resolvedNumber !== flightNumber ||
+    resolvedDate !== flightDate ||
+    !departureCode ||
+    !arrivalCode ||
+    !/^[A-Z]{3}$/.test(departureCode) ||
+    !/^[A-Z]{3}$/.test(arrivalCode)
+  ) {
+    return null;
+  }
+
+  return {
+    kind,
+    source: item.source === 'airlabs' ? 'airlabs' : 'flightera',
+    flightNumber,
+    flightDate,
+    departureCode,
+    departureName: optionalString(item.departureName),
+    arrivalCode,
+    arrivalName: optionalString(item.arrivalName),
+    departureTime: optionalString(item.departureTime),
+    arrivalTime: optionalString(item.arrivalTime),
+    arrivalDate: optionalString(item.arrivalDate),
+    durationMinutes: optionalNumber(item.durationMinutes),
+    aircraftModel: optionalString(item.aircraftModel),
+    registration: optionalString(item.registration)?.toUpperCase(),
+    airlineCode: optionalString(item.airlineCode)?.toUpperCase(),
+    airlineName: optionalString(item.airlineName),
+    distanceKm: optionalNumber(item.distanceKm),
+    scheduledDepartureAt: optionalString(item.scheduledDepartureAt),
+    scheduledArrivalAt: optionalString(item.scheduledArrivalAt),
+  };
+}
+
+async function requestServerLookup(
+  flightNumber: string,
+  flightDate: string,
+): Promise<LookupSuggestion[]> {
+  if (!supabase) {
+    return [];
+  }
+
+  const invocation = supabase.functions.invoke('flight-lookup', {
+    body: {
+      flightNumber,
+      flightDate,
+    },
+  });
+
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('La búsqueda tardó demasiado')), 12000);
+  });
+
+  const { data, error } = await Promise.race([invocation, timeout]);
+
+  if (error) {
+    throw error;
+  }
+
+  const rawSuggestions: unknown[] =
+    data && typeof data === 'object' && Array.isArray(data.suggestions)
+      ? data.suggestions
+      : [];
+
+  return rawSuggestions
+    .map((item) => parseServerSuggestion(item, flightNumber, flightDate))
+    .filter((item): item is LookupSuggestion => Boolean(item));
+}
+async function requestFlightLookup(
+  flightNumber: string,
+  flightDate: string,
+): Promise<LookupSuggestion[]> {
+  try {
+    const serverSuggestions = await requestServerLookup(
+      flightNumber,
+      flightDate,
+    );
+
+    if (serverSuggestions.length) {
+      return serverSuggestions;
+    }
+  } catch (error) {
+    console.warn('SERVER FLIGHT LOOKUP ERROR:', error);
+  }
+
+  return requestFlighteraLookup(flightNumber, flightDate);
 }
 
 async function requestFlighteraLookup(
@@ -826,51 +912,6 @@ async function requestFlighteraLookup(
         detailUrl,
       );
 
-    await debugFlighteraPageData(
-      detailHtml,
-      detailUrl,
-    );
-
-    // FLIGHTERA AIRCRAFT DEBUG
-    const aircraftDebugTerms = [
-      'registration',
-      'aircraft',
-      'aircraftRegistration',
-      'aircraftModel',
-      'Airbus',
-      'Boeing',
-      'Embraer',
-      'Bombardier',
-      'ATR',
-      'A319',
-      'A320',
-      'A321',
-      'B737',
-      'B738',
-      'B38M',
-      'E190',
-      'E195',
-    ];
-
-    for (const term of aircraftDebugTerms) {
-      const index = detailHtml
-        .toLowerCase()
-        .indexOf(term.toLowerCase());
-
-      if (index >= 0) {
-        const start = Math.max(0, index - 250);
-        const end = Math.min(
-          detailHtml.length,
-          index + 500,
-        );
-
-        console.log(
-          `FLIGHTERA DEBUG ${term}:`,
-          detailHtml.slice(start, end),
-        );
-      }
-    }
-
     const detailFlight =
       extractFlight(
         detailHtml,
@@ -947,70 +988,24 @@ export function applySuggestion(
     return draft;
   }
 
-  const source =
-    `Flightera:${suggestion.kind}`;
+  const sourceName = suggestion.source === 'airlabs'
+    ? 'AirLabs'
+    : 'Flightera';
+  const source = `${sourceName}:${suggestion.kind}`;
+  const fieldSources = { ...draft.fieldSources };
+  const departureAirport = getAirport(suggestion.departureCode);
+  const arrivalAirport = getAirport(suggestion.arrivalCode);
+  const catalogDistance = routeDistanceKm(
+    departureAirport,
+    arrivalAirport,
+  );
 
-  const fieldSources = {
-    ...draft.fieldSources,
-  };
-
-  fieldSources.departureCode =
-    source;
-
-  fieldSources.arrivalCode =
-    source;
-
-  if (suggestion.departureName) {
-    fieldSources.departureName =
-      source;
-  }
-
-  if (suggestion.arrivalName) {
-    fieldSources.arrivalName =
-      source;
-  }
-
-  if (suggestion.departureTime) {
-    fieldSources.departureTime =
-      source;
-  }
-
-  if (suggestion.arrivalTime) {
-    fieldSources.arrivalTime =
-      source;
-  }
-
-  if (suggestion.arrivalDate) {
-    fieldSources.arrivalDate =
-      source;
-  }
-
-  if (
-    suggestion.durationMinutes != null
-  ) {
-    fieldSources.durationMinutes =
-      source;
-  }
-
-
-  if (suggestion.distanceKm != null) {
-    fieldSources.distanceKm =
-      source;
-  }
-
-  if (suggestion.aircraftModel) {
-    fieldSources.aircraftModel =
-      source;
-  }
-
-  if (suggestion.registration) {
-    fieldSources.registration =
-      source;
-  }
-
-  if (suggestion.airlineName) {
-    fieldSources.airlineName =
-      source;
+  // Una nueva consulta solo rellena campos vacíos o actualiza campos que ya
+  // procedían de otra consulta. Las correcciones manuales siempre prevalecen.
+  function mergeAutomatic(field: keyof FlightDraft, current: string, incoming?: string | null) {
+    if (!incoming || (current && !draft.fieldSources[field])) return current;
+    fieldSources[field] = source;
+    return incoming;
   }
 
   return {
@@ -1018,66 +1013,19 @@ export function applySuggestion(
 
     fieldSources,
 
-    airlineName:
-      suggestion.airlineName ||
-      draft.airlineName ||
-      suggestion.airlineCode ||
-      '',
-
-    departureCode:
-      suggestion.departureCode,
-
-    departureName:
-      suggestion.departureName ||
-      draft.departureName,
-
-    arrivalCode:
-      suggestion.arrivalCode,
-
-    arrivalName:
-      suggestion.arrivalName ||
-      draft.arrivalName,
-
-    departureTime:
-      suggestion.departureTime ||
-      draft.departureTime,
-
-    arrivalTime:
-      suggestion.arrivalTime ||
-      draft.arrivalTime,
-
-    arrivalDate:
-      suggestion.arrivalDate ||
-      draft.arrivalDate,
-
-    durationMinutes:
-      suggestion.durationMinutes != null
-        ? String(
-            suggestion.durationMinutes,
-          )
-        : draft.durationMinutes,
-
-    distanceKm:
-      suggestion.distanceKm != null
-        ? String(
-            suggestion.distanceKm,
-          )
-        : draft.distanceKm,
-
-    scheduledDepartureAt:
-      suggestion.scheduledDepartureAt ||
-      draft.scheduledDepartureAt,
-
-    scheduledArrivalAt:
-      suggestion.scheduledArrivalAt ||
-      draft.scheduledArrivalAt,
-
-    aircraftModel:
-      suggestion.aircraftModel ||
-      draft.aircraftModel,
-
-    registration:
-      suggestion.registration ||
-      draft.registration,
+    airlineName: mergeAutomatic('airlineName', draft.airlineName, suggestion.airlineName || suggestion.airlineCode),
+    departureCode: mergeAutomatic('departureCode', draft.departureCode, suggestion.departureCode),
+    departureName: mergeAutomatic('departureName', draft.departureName, suggestion.departureName || departureAirport?.name),
+    arrivalCode: mergeAutomatic('arrivalCode', draft.arrivalCode, suggestion.arrivalCode),
+    arrivalName: mergeAutomatic('arrivalName', draft.arrivalName, suggestion.arrivalName || arrivalAirport?.name),
+    departureTime: mergeAutomatic('departureTime', draft.departureTime, suggestion.departureTime),
+    arrivalTime: mergeAutomatic('arrivalTime', draft.arrivalTime, suggestion.arrivalTime),
+    arrivalDate: mergeAutomatic('arrivalDate', draft.arrivalDate, suggestion.arrivalDate),
+    durationMinutes: mergeAutomatic('durationMinutes', draft.durationMinutes, suggestion.durationMinutes != null ? String(suggestion.durationMinutes) : undefined),
+    distanceKm: mergeAutomatic('distanceKm', draft.distanceKm, suggestion.distanceKm != null ? String(suggestion.distanceKm) : catalogDistance != null ? String(catalogDistance) : undefined),
+    scheduledDepartureAt: mergeAutomatic('scheduledDepartureAt', draft.scheduledDepartureAt, suggestion.scheduledDepartureAt),
+    scheduledArrivalAt: mergeAutomatic('scheduledArrivalAt', draft.scheduledArrivalAt, suggestion.scheduledArrivalAt),
+    aircraftModel: mergeAutomatic('aircraftModel', draft.aircraftModel, suggestion.aircraftModel),
+    registration: mergeAutomatic('registration', draft.registration, suggestion.registration),
   };
 }

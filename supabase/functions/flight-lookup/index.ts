@@ -25,6 +25,24 @@ type FlighteraFlight = {
     icaoCode?: string;
     name?: string;
   };
+  aircraft?: string | {
+    name?: string;
+    model?: string;
+    identifier?: string;
+  };
+};
+
+type AirLabsRoute = {
+  airline_iata?: string;
+  flight_iata?: string;
+  flight_number?: string;
+  dep_iata?: string;
+  arr_iata?: string;
+  dep_time?: string;
+  arr_time?: string;
+  duration?: number;
+  days?: unknown;
+  aircraft_icao?: string;
 };
 
 const FLIGHTERA_BASE = 'https://www.flightera.net';
@@ -48,6 +66,77 @@ const cors = {
 
 const asText = (value: unknown): string =>
   typeof value === 'string' ? value.trim() : '';
+
+const airlineNames: Record<string, string> = {
+  V7: 'Volotea',
+  IB: 'Iberia',
+  I2: 'Iberia Express',
+  UX: 'Air Europa',
+  VY: 'Vueling',
+  FR: 'Ryanair',
+  U2: 'easyJet',
+  W6: 'Wizz Air',
+};
+
+const aircraftNames: Record<string, string> = {
+  A319: 'Airbus A319',
+  A320: 'Airbus A320',
+  A20N: 'Airbus A320neo',
+  A321: 'Airbus A321',
+  A21N: 'Airbus A321neo',
+  A332: 'Airbus A330-200',
+  A333: 'Airbus A330-300',
+  A338: 'Airbus A330-800neo',
+  A339: 'Airbus A330-900neo',
+  A359: 'Airbus A350-900',
+  A35K: 'Airbus A350-1000',
+  B737: 'Boeing 737',
+  B738: 'Boeing 737-800',
+  B739: 'Boeing 737-900',
+  B38M: 'Boeing 737 MAX 8',
+  B39M: 'Boeing 737 MAX 9',
+  B744: 'Boeing 747-400',
+  B748: 'Boeing 747-8',
+  B752: 'Boeing 757-200',
+  B763: 'Boeing 767-300',
+  B772: 'Boeing 777-200',
+  B77W: 'Boeing 777-300ER',
+  B788: 'Boeing 787-8',
+  B789: 'Boeing 787-9',
+  B78X: 'Boeing 787-10',
+  E190: 'Embraer E190',
+  E195: 'Embraer E195',
+  E290: 'Embraer E190-E2',
+  E295: 'Embraer E195-E2',
+  AT72: 'ATR 72',
+  AT76: 'ATR 72-600',
+  CRJ9: 'Bombardier CRJ900',
+};
+
+function aircraftName(value: unknown): string | undefined {
+  const code = asText(value).toUpperCase();
+  return code ? aircraftNames[code] ?? code : undefined;
+}
+
+function dateWeekdayTokens(value: string): string[] {
+  const weekday = new Date(`${value}T12:00:00Z`).getUTCDay();
+  const short = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday];
+  const long = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][weekday];
+  return [String(weekday), String(weekday === 0 ? 7 : weekday), short, long];
+}
+
+function routeRunsOnDate(days: unknown, flightDate: string): boolean {
+  if (days == null || days === '') return true;
+
+  const values = Array.isArray(days)
+    ? days.map((item) => asText(item).toLowerCase())
+    : asText(days).toLowerCase().split(/[\s,;|/]+/);
+
+  if (!values.length) return true;
+
+  const tokens = dateWeekdayTokens(flightDate);
+  return values.some((value) => tokens.includes(value));
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -177,6 +266,120 @@ function distanceKm(value: unknown): number | undefined {
   return Number.isFinite(number) ? Math.round(number) : undefined;
 }
 
+function aircraftFromFlightera(
+  flight: FlighteraFlight,
+  html: string,
+): { aircraftModel?: string; registration?: string } {
+  const aircraft = flight.aircraft;
+  const schemaModel = typeof aircraft === 'string'
+    ? aircraft.trim()
+    : aircraft?.model?.trim() || aircraft?.name?.trim();
+  const schemaRegistration = typeof aircraft === 'object'
+    ? aircraft.identifier?.trim().toUpperCase()
+    : undefined;
+  const normalizedHtml = html
+    .replace(/&quot;/gi, '"')
+    .replace(/\\u002D/gi, '-');
+  const registrationMatch = normalizedHtml.match(
+    /"(?:aircraftRegistration|aircraft_registration|registration)"\s*:\s*"([A-Z0-9]{1,3}-[A-Z0-9]{3,6})"/i,
+  ) ?? normalizedHtml.match(
+    /(?:AIRCRAFT\s+)?REGISTRATION[\s\S]{0,800}?([A-Z0-9]{1,3}-[A-Z0-9]{3,6})/i,
+  );
+  const modelMatch = normalizedHtml.match(
+    /"(?:aircraftModel|aircraft_model|aircraftType|aircraft_type)"\s*:\s*"([^"<>]{2,60})"/i,
+  );
+
+  return {
+    aircraftModel: schemaModel || modelMatch?.[1]?.trim() || undefined,
+    registration:
+      schemaRegistration && /^[A-Z0-9]{1,3}-[A-Z0-9]{3,6}$/.test(schemaRegistration)
+        ? schemaRegistration
+        : registrationMatch?.[1]?.toUpperCase(),
+  };
+}
+
+async function lookupAirLabsRoutes(
+  flightNumber: string,
+  flightDate: string,
+) {
+  const apiKey = Deno.env.get('AIRLABS_API_KEY');
+
+  if (!apiKey) {
+    console.warn('AIRLABS_API_KEY is not configured');
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    flight_iata: flightNumber,
+    _fields:
+      'airline_iata,flight_iata,flight_number,dep_iata,arr_iata,' +
+      'dep_time,arr_time,duration,days,aircraft_icao',
+  });
+  const response = await fetch(`https://airlabs.co/api/v9/routes?${params}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => null) as
+    | { response?: AirLabsRoute[]; error?: { message?: string } }
+    | null;
+
+  if (!response.ok || payload?.error) {
+    throw new Error(
+      payload?.error?.message || `AirLabs HTTP ${response.status}`,
+    );
+  }
+
+  const routes = Array.isArray(payload?.response) ? payload.response : [];
+  const matchingDay = routes.filter((route) =>
+    routeRunsOnDate(route.days, flightDate)
+  );
+  const candidates = matchingDay.length ? matchingDay : routes;
+  const seen = new Set<string>();
+
+  return candidates.flatMap((route) => {
+    const departureCode = asText(route.dep_iata).toUpperCase();
+    const arrivalCode = asText(route.arr_iata).toUpperCase();
+    const airlineCode = asText(route.airline_iata).toUpperCase();
+    const resolvedNumber = asText(route.flight_iata)
+      .replace(/\s+/g, '')
+      .toUpperCase() || `${airlineCode}${asText(route.flight_number)}`;
+
+    if (
+      resolvedNumber !== flightNumber ||
+      !/^[A-Z]{3}$/.test(departureCode) ||
+      !/^[A-Z]{3}$/.test(arrivalCode)
+    ) {
+      return [];
+    }
+
+    const departureTime = asText(route.dep_time) || undefined;
+    const arrivalTime = asText(route.arr_time) || undefined;
+    const key = `${departureCode}-${arrivalCode}-${departureTime ?? ''}`;
+
+    if (seen.has(key)) return [];
+    seen.add(key);
+
+    return [{
+      kind: 'route',
+      source: 'airlabs',
+      flightNumber,
+      flightDate,
+      departureCode,
+      arrivalCode,
+      airlineCode: airlineCode || undefined,
+      airlineName: airlineNames[airlineCode],
+      departureTime,
+      arrivalTime,
+      durationMinutes:
+        typeof route.duration === 'number' && Number.isFinite(route.duration)
+          ? Math.round(route.duration)
+          : undefined,
+      aircraftModel: aircraftName(route.aircraft_icao),
+      registration: undefined,
+    }];
+  }).slice(0, 8);
+}
+
 async function lookupFlightera(
   flightNumber: string,
   flightDate: string,
@@ -279,6 +482,7 @@ async function lookupFlightera(
 
   const scheduledDepartureAt = asText(flight.departureTime);
   const scheduledArrivalAt = asText(flight.arrivalTime);
+  const aircraft = aircraftFromFlightera(flight, detailHtml);
 
   const suggestion = {
     kind: 'dated',
@@ -320,12 +524,8 @@ async function lookupFlightera(
 
     source: 'flightera',
 
-    /*
-     * Aircraft model and registration are intentionally omitted for now.
-     * Flightera loads those through its protected page_data endpoint.
-     */
-    aircraftModel: undefined,
-    registration: undefined,
+    aircraftModel: aircraft.aircraftModel,
+    registration: aircraft.registration,
   };
 
   return [suggestion];
@@ -362,26 +562,36 @@ Deno.serve(
       );
     }
 
-    try {
-      const suggestions =
-        await lookupFlightera(flightNumber, flightDate);
+    let suggestions: unknown[] = [];
+    const today = new Date().toISOString().slice(0, 10);
 
-      return Response.json(
-        { suggestions },
-        { headers: cors },
-      );
-    } catch (error) {
-      console.error('Flightera lookup error:', error);
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Error al buscar el vuelo';
-
-      return Response.json(
-        { error: message },
-        { status: 502, headers: cors },
-      );
+    if (flightDate > today) {
+      try {
+        suggestions = await lookupAirLabsRoutes(flightNumber, flightDate);
+      } catch (error) {
+        console.error('AirLabs route lookup error:', error);
+      }
     }
+
+    if (!suggestions.length) {
+      try {
+        suggestions = await lookupFlightera(flightNumber, flightDate);
+      } catch (error) {
+        console.warn('Flightera lookup unavailable:', error);
+      }
+    }
+
+    if (!suggestions.length && flightDate <= today) {
+      try {
+        suggestions = await lookupAirLabsRoutes(flightNumber, flightDate);
+      } catch (error) {
+        console.error('AirLabs route lookup error:', error);
+      }
+    }
+
+    return Response.json(
+      { suggestions },
+      { headers: cors },
+    );
   }),
 );
